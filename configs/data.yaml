@@ -1,0 +1,39 @@
+raw_dir: data/raw
+processed_dir: data/processed
+
+datasets:
+  phapdien:
+    hf_id: tmquan/phapdien-moj-gov-vn
+    configs:
+      - articles
+      - subjects
+      - tree_nodes
+      - ontology_topics
+      - ontology_subjects
+
+  vbpl_large:
+    hf_id: th1nhng0/vietnamese-legal-documents
+    configs:
+      - metadata
+      - content
+      - relationships
+
+  vbpl_markdown:
+    hf_id: tmquan/vbpl-vn
+    configs:
+      - default
+
+  yuitc_ir:
+    hf_id: YuITC/Vietnamese-Legal-Documents
+
+  legal_instruct:
+    hf_id: duyet/vietnamese-legal-instruct
+
+  legal_terms:
+    hf_id: tmquan/thuvienphapluat-vn-tnpl
+    configs:
+      - vietnamese
+      - bilingual
+
+  anle:
+    hf_id: tmquan/anle-toaan-gov-vn
