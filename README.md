@@ -4,7 +4,50 @@ Hệ thống hỏi đáp pháp luật tiếng Việt theo hướng multi-agent R
 
 ## Pipeline
 
-[![Legal Agent RAG Pipeline](image/pipeline.png)](image/pipeline.png)
+```mermaid
+flowchart TD
+    A[Test Question] --> B[Supervisor Agent]
+    B --> C[Legal Understanding Agent]
+    C --> D[Query Planner Agent]
+
+    D --> E[Retrieval Router]
+
+    E --> R1[Exact Search<br/>mã văn bản / điều / từ khóa]
+    E --> R2[BM25 Search]
+    E --> R3[Dense Retrieval<br/>Fine-tuned BGE-M3]
+    E --> R4[Sparse Retrieval<br/>BGE-M3 sparse / SPLADE]
+    E --> R5[ColBERT / Multi-vector Retrieval]
+    E --> R6[Legal Graph Retrieval]
+    E --> R7[Summary / RAPTOR / LightRAG Retrieval]
+
+    R1 --> F[Candidate Fusion<br/>Weighted RRF + Vote Boost]
+    R2 --> F
+    R3 --> F
+    R4 --> F
+    R5 --> F
+    R6 --> F
+    R7 --> F
+
+    F --> G[Legal Filter<br/>hiệu lực / lĩnh vực / loại văn bản]
+    G --> H[Article-level Reranker]
+    H --> I[Context Expansion<br/>Điều → Khoản → Điểm → Văn bản cha]
+    I --> J[Evidence Selector Agent]
+
+    J --> K{Evidence đủ mạnh?}
+
+    K -- Không --> D
+    K -- Có --> L[Legal Reasoning Agent]
+
+    L --> M[Citation Verifier Agent]
+    M --> N{Answer khớp evidence?}
+
+    N -- Không --> L
+    N -- Có --> O[Submission Formatter Agent]
+
+    O --> P[JSON Schema Validator]
+    P --> Q[results.json]
+    Q --> Z[results.zip phẳng]
+```
 
 Luồng chính:
 
