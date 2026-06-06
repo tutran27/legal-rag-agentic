@@ -1,5 +1,7 @@
 from pathlib import Path
+import re
 import pandas as pd
+from pathlib import Path
 
 def load_vbpl_raw(
     metadata_path: Path = "data/raw/vbpl_large/metadata_data.parquet",
@@ -19,22 +21,10 @@ def inspect_columns():
     print("Content columns:", cont.columns.tolist())
     print("Relationships columns:", rel.columns.tolist())
 
-def get_first_existing(row, candidates):
-    for col in candidates:
-        if col in row and pd.notna(row[col]):
-            return row[col]
-    return None
-
-import re
-import pandas as pd
-from pathlib import Path
-
-
 def normalize_text(x):
     if x is None or pd.isna(x):
         return None
     return re.sub(r"\s+", " ", str(x)).strip()
-
 
 def get_first_existing(row, candidates):
     for col in candidates:
@@ -55,12 +45,12 @@ def build_documents(
         row = row.to_dict()
 
         doc_id = get_first_existing(row, ["id", "doc_id", "document_id"])
-        doc_code = get_first_existing(row, ["doc_code", "number", "so_hieu", "code"])
+        doc_code = get_first_existing(row, ["doc_code", "number", "so_ky_hieu", "code"])
         doc_type = get_first_existing(row, ["doc_type", "type", "loai_van_ban"])
         title = get_first_existing(row, ["title", "trich_yeu", "doc_title", "name"])
         issuer = get_first_existing(row, ["issuer", "co_quan_ban_hanh"])
         status = get_first_existing(row, ["status", "tinh_trang_hieu_luc"])
-        source_url = get_first_existing(row, ["source_url", "url"])
+        source_url = get_first_existing(row, ["source_url", "url"])    # Khả năng ra None vì check inspect column ko thấy cột
 
         doc_code = normalize_text(doc_code)
         doc_type = normalize_text(doc_type)
@@ -82,6 +72,10 @@ def build_documents(
             "source_url": source_url,
         })
 
+    print(f"----📄Document Sample ----")
+    for key, item in rows[0].items():
+        print(f"{key.upper()}: {item}")
+        
     out = pd.DataFrame(rows)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(output_path, index=False)
@@ -119,8 +113,8 @@ def build_legal_edges(
     for _, row in rels.iterrows():
         r = row.to_dict()
 
-        source_id = get_first_existing(r, ["doc_id", "source_doc_id", "source_id"])
-        target_id = get_first_existing(r, ["target_doc_id", "target_id", "related_doc_id"])
+        source_id = get_first_existing(r, ["doc_id", "source_doc_id", "id"])
+        target_id = get_first_existing(r, ["target_doc_id", "target_id", "other_doc_id"])
         relation_raw = get_first_existing(r, ["relation_type", "type", "relationship"])
 
         if source_id is None or target_id is None:
@@ -132,7 +126,11 @@ def build_legal_edges(
             "relation_type": normalize_relation_type(relation_raw),
             "relation_raw": relation_raw,
         })
-
+    
+    print(f"----📄Legal Edges Sample ----")
+    for key, item in rows[0].items():
+        print(f"{key.upper()}: {item}")
+    
     out = pd.DataFrame(rows)
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     out.to_parquet(output_path, index=False)
@@ -142,3 +140,5 @@ def build_legal_edges(
     
 if __name__ == "__main__":
     inspect_columns()
+    build_documents()
+    build_legal_edges()

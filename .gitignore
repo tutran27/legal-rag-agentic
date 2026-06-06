@@ -48,13 +48,21 @@ venv.bak/
 # Data (large datasets)
 data/raw/
 data/processed/
+data/indexes/
+data/cache/
 data/*.parquet
 data/*.csv
 data/*.json
 data/*.jsonl
 
+# Generated submission artifacts
+results.json
+results.zip
+submissions/
+
 # Models
 models/
+checkpoints/
 *.pkl
 *.pt
 *.pth
@@ -68,6 +76,9 @@ logs/
 # Cache
 .cache/
 *.cache
+__pypackages__/
+huggingface/
+.huggingface/
 
 # OS
 Thumbs.db
@@ -87,7 +98,15 @@ dmypy.json
 # Ruff
 .ruff_cache/
 
+# Type check / lint
+.pyre/
+.pytype/
+
 # Temporary files
 tmp/
 temp/
 *.tmp
+
+# Local vector stores / services
+qdrant_storage/
+storage/

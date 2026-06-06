@@ -71,8 +71,8 @@ def build_submission_title(doc_type: str | None, doc_code: str | None, raw_title
     return f"{doc_type} {doc_code} {raw_title}".strip()
 
 def process_phapdien_article(
-    input_path: str,
-    output_path: str
+    input_path: str = "data/raw/phapdien/articles_train.parquet",
+    output_path: str = "data/processed/phapdien-moj-gov-vn.parquet"
 ):
     df=pd.read_parquet(input_path)
     
@@ -146,6 +146,6 @@ if __name__ == "__main__":
     
     # Test process phapdien
     print("------------ Test process phapdien ------------")
-    df = process_phapdien_article("data/raw/phapdien/articles_train.parquet", "data/processed/phapdien-moj-gov-vn.parquet")
+    df = process_phapdien_article()
     print(df.head())
     
