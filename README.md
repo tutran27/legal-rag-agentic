@@ -4,7 +4,7 @@ Hệ thống hỏi đáp pháp luật tiếng Việt theo hướng multi-agent R
 
 ## Pipeline
 
-![Legal Agent RAG Pipeline](image/mermaid-diagram%20(4).png)
+[![Legal Agent RAG Pipeline](image/pipeline.png)](image/pipeline.png)
 
 Luồng chính:
 
