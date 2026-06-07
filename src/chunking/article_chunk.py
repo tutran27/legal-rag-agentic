@@ -3,7 +3,7 @@
 def build_article_chunk(row):
     return f"""
 [VĂN BẢN]
-{row["doc_title_submission"]}
+{row.get("doc_name_for_submission") or row["doc_title_submission"]}
 
 [ĐIỀU]
 {row["article"]}

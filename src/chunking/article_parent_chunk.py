@@ -6,13 +6,13 @@ def build_article_parent_chunk(row):
 
     return f"""
 [VĂN BẢN]
-{row["doc_title_submission"]}
+{row.get("doc_name_for_submission") or row["doc_title_submission"]}
 
 [LĨNH VỰC / CHỦ ĐỀ]
-{metadata.get("topic_title", "")} > {metadata.get("subject_title", "")}
+{metadata.get("domain", "") or metadata.get("topic_title", "")} > {metadata.get("subject_title", "")}
 
 [CHƯƠNG / MỤC]
-{metadata.get("chapter_title", "")}
+{metadata.get("parent_path", "") or metadata.get("chapter_title", "")}
 
 [ĐIỀU]
 {row["article"]}

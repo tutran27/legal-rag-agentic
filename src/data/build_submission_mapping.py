@@ -12,7 +12,7 @@ def build_submission_mapping(
 
     for _, row in df.iterrows():
         doc_code = row.get("doc_code")
-        title = row.get("doc_title_submission")
+        title = row.get("doc_name_for_submission") or row.get("doc_title_submission")
         article = row.get("article")
 
         if not doc_code or not title or not article:

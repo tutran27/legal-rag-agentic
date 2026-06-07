@@ -20,6 +20,16 @@ def build_retrieval_corpus(
             "unit_id": r["unit_id"],
             "chunk_type": "article",
             "text": build_article_chunk(r),
+            "doc_code": r.get("doc_code"),
+            "doc_type": r.get("doc_type"),
+            "doc_title_submission": r.get("doc_title_submission"),
+            "doc_name_for_submission": r.get("doc_name_for_submission"),
+            "article": r.get("article"),
+            "article_title": r.get("article_title"),
+            "parent_path": r.get("parent_path"),
+            "domain": r.get("domain"),
+            "status": r.get("status"),
+            "source_url": r.get("source_url"),
         })
 
         rows.append({
@@ -27,6 +37,16 @@ def build_retrieval_corpus(
             "unit_id": r["unit_id"],
             "chunk_type": "article_parent",
             "text": build_article_parent_chunk(r),
+            "doc_code": r.get("doc_code"),
+            "doc_type": r.get("doc_type"),
+            "doc_title_submission": r.get("doc_title_submission"),
+            "doc_name_for_submission": r.get("doc_name_for_submission"),
+            "article": r.get("article"),
+            "article_title": r.get("article_title"),
+            "parent_path": r.get("parent_path"),
+            "domain": r.get("domain"),
+            "status": r.get("status"),
+            "source_url": r.get("source_url"),
         })
 
     out = pd.DataFrame(rows)

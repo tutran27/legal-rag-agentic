@@ -52,6 +52,16 @@ def build_dense_qdrant(
                         "unit_id": row["unit_id"],
                         "chunk_type": row["chunk_type"],
                         "text": row["text"],
+                        "doc_code": row.get("doc_code"),
+                        "doc_type": row.get("doc_type"),
+                        "doc_title_submission": row.get("doc_title_submission"),
+                        "doc_name_for_submission": row.get("doc_name_for_submission"),
+                        "article": row.get("article"),
+                        "article_title": row.get("article_title"),
+                        "parent_path": row.get("parent_path"),
+                        "domain": row.get("domain"),
+                        "status": row.get("status"),
+                        "source_url": row.get("source_url"),
                     },
                 )
             )
