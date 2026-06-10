@@ -71,7 +71,7 @@ def build_submission_title(doc_type: str | None, doc_code: str | None, raw_title
     return f"{doc_type} {doc_code} {raw_title}".strip()
 
 def process_phapdien_article(
-    input_path: str = "data/raw/phapdien/articles_train.parquet",
+    input_path: str = "data/raw/phapdien/articles.parquet",
     output_path: str = "data/processed/phapdien-moj-gov-vn.parquet"
 ):
     df=pd.read_parquet(input_path)
@@ -143,9 +143,8 @@ if __name__ == "__main__":
     print(f"Doc type: {infer_doc_type(source_note_text)}")
     print(f"Doc title rough: {extract_doc_title_rough(source_note_text)}")
     print(f"Doc title submission: {build_submission_title(infer_doc_type(source_note_text), extract_doc_code(source_note_text), extract_doc_title_rough(source_note_text))}")
-    
+
     # Test process phapdien
     print("------------ Test process phapdien ------------")
     df = process_phapdien_article()
     print(df.head())
-    

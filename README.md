@@ -111,45 +111,62 @@ Nếu dùng Qdrant:
 docker run -p 6333:6333 qdrant/qdrant
 ```
 
-## Chạy pipeline dữ liệu
+## Tải và xử lý dữ liệu
 
-Tải dữ liệu:
+Chạy các lệnh từ thư mục gốc của repository.
+
+### 1. Tải dữ liệu
 
 ```bash
 python scripts/01_download_data.py
 ```
 
-Process Pháp điển:
+Script tải các nguồn Hugging Face vào `data/raw/`:
+
+- Pháp điển: `tmquan/phapdien-moj-gov-vn`.
+- Văn bản pháp luật: `th1nhng0/vietnamese-legal-documents`.
+- VBPL Markdown: `tmquan/vbpl-vn`.
+- Legal instruction: `duyet/vietnamese-legal-instruct`.
+
+Dữ liệu có dung lượng lớn, cần bảo đảm đủ dung lượng ổ đĩa và kết nối
+mạng ổn định.
+
+### 2. Build dataset retrieval
 
 ```bash
-python -m src.data.process_phapdien
+python scripts/02_process_data.py
 ```
 
-Tạo legal units:
+Script lần lượt:
 
-```bash
-python -m src.data.build_legal_units
+1. Chuẩn hóa metadata văn bản VBPL.
+2. Tách nội dung VBPL thành từng Điều.
+3. Tạo quan hệ giữa các văn bản.
+4. Chuẩn hóa dữ liệu Pháp điển.
+5. Hợp nhất VBPL và Pháp điển thành `legal_units`.
+6. Chia Điều dài thành retrieval chunks.
+7. Tạo mapping dùng cho submission.
+
+Các file đầu ra nằm trong `data/processed/`:
+
+```text
+documents.parquet
+vbpl_articles.parquet
+legal_edges.parquet
+phapdien-moj-gov-vn.parquet
+legal_units.parquet
+retrieval_corpus.parquet
+submission_mapping.parquet
 ```
 
-Process VBPL:
+Để chạy riêng từng bước:
 
 ```bash
 python -m src.data.process_vbpl
-```
-
-Build dense index:
-
-```bash
-python -m src.indexing.build_dense_qdrant
-```
-
-## Dữ liệu đầu ra chính
-
-```text
-data/processed/phapdien-moj-gov-vn.parquet
-data/processed/legal_units.parquet
-data/processed/documents.parquet
-data/processed/legal_edges.parquet
+python -m src.data.process_phapdien
+python -m src.data.build_legal_units
+python -m src.chunking.build_retrieval_corpus
+python -m src.data.build_submission_mapping
 ```
 
 ## Test
@@ -159,19 +176,3 @@ pytest
 ```
 
 Một số test yêu cầu đã có dữ liệu trong `data/processed/`.
-
-## Ghi chú kỹ thuật
-
-`src.data.build_legal_units` hiện cần xử lý thêm:
-
-- `source_links` có thể là `numpy.ndarray`, cần convert sang `list` trước khi `json.dumps`.
-- Cần import `Path` từ `pathlib`.
-
-## Roadmap ngắn
-
-1. Fix pipeline tạo `legal_units.parquet`.
-2. Tạo `retrieval_corpus.parquet`.
-3. Hoàn thiện exact/BM25/dense retriever.
-4. Triển khai fusion + reranker + context expansion.
-5. Hoàn thiện agent workflow.
-6. Sinh, validate và zip `results.json`.
