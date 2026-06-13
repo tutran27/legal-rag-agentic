@@ -50,6 +50,7 @@ class RetrievalPlan(BaseModel):
     use_dense: bool = True
     use_sparse: bool = True
     use_colbert: bool = True
+    use_cross_encoder: bool = True
     use_graph: bool = True
     use_summary: bool = False
 
@@ -57,7 +58,8 @@ class RetrievalPlan(BaseModel):
     top_k_bm25: int = 100
     top_k_dense: int = 100
     top_k_sparse: int = 100
-    top_k_colbert: int = 100
+    top_k_colbert: int = 50
+    top_k_cross_encoder: int = 30
     top_k_graph: int = 50
     top_k_summary: int = 30
 

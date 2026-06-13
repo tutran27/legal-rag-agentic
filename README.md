@@ -169,6 +169,166 @@ python -m src.chunking.build_retrieval_corpus
 python -m src.data.build_submission_mapping
 ```
 
+## Tạo embedding trên Modal và ingest Qdrant Docker
+
+Pipeline:
+
+```text
+retrieval_corpus.parquet
+        |
+        v
+Modal A100 80GB tạo dense embedding float16
+        |
+        v
+Modal Volume: embedding_shards/part-*.parquet
+        |
+        v
+data/embedding_shards trên ổ D
+        |
+        v
+Qdrant Docker: data/qdrant_storage trên ổ D
+```
+
+`data/embedding_shards` là Parquet trung gian. `data/qdrant_storage` là
+database nội bộ của Qdrant gồm vector segments, BM25, WAL và HNSW. Không mount
+thư mục shard trực tiếp vào `/qdrant/storage`.
+
+### 1. Chuẩn bị Modal trong WSL
+
+```bash
+cd /mnt/d/legal-agent-rag
+conda activate legal_rag_agent
+pip install -r requirements.txt
+modal token new
+```
+
+Tạo secret chứa Hugging Face token quyền `Read`:
+
+```bash
+modal secret create legal-rag-secrets \
+  HF_TOKEN="YOUR-HF-TOKEN"
+```
+
+Không ghi token thật vào README, source code, log hoặc Git. Nếu token đã từng
+bị công khai, phải thu hồi và tạo token mới.
+
+### 2. Upload corpus lên Modal Volume
+
+```bash
+modal run scripts/modal_ingest.py --action upload
+```
+
+Corpus được lưu trong Modal Volume `legal-rag-ingest-data`.
+
+### 3. Tạo embedding bằng A100 80GB
+
+Chạy mới và xóa checkpoint/shard cũ:
+
+```bash
+modal run --detach scripts/modal_ingest.py --action start --recreate
+```
+
+Job thử batch từ `8192` và tự giảm đến `128` khi thiếu VRAM. Batch ổn định
+thực tế trên A100 80GB là `2048`.
+
+Nếu job bị preempt, hết spending limit hoặc dừng giữa chừng, resume bằng:
+
+```bash
+modal run --detach scripts/modal_ingest.py --action start
+```
+
+Không dùng `--recreate` khi resume. Checkpoint được lưu theo Parquet row group.
+
+Theo dõi:
+
+```bash
+modal app list
+modal app logs legal-rag-embedding -f
+modal volume ls legal-rag-ingest-data /embedding_shards
+```
+
+Khi hoàn thành phải có `101` file từ `part-0000.parquet` đến
+`part-0100.parquet`.
+
+### 4. Tải embedding shards về ổ D
+
+```bash
+cd /mnt/d/legal-agent-rag
+modal volume get \
+  legal-rag-ingest-data \
+  /embedding_shards \
+  data/embedding_shards
+```
+
+Không tải vào `/home/...` vì WSL virtual disk thường nằm trên ổ C.
+
+Kiểm tra:
+
+```bash
+find data/embedding_shards -name "part-*.parquet" | wc -l
+du -sh data/embedding_shards
+```
+
+Số file phải là `101`.
+
+### 5. Chạy Qdrant Docker local
+
+`docker-compose.yml` bind mount Qdrant storage vào:
+
+```text
+D:\legal-agent-rag\data\qdrant_storage
+```
+
+Khởi động:
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+Kiểm tra:
+
+```bash
+curl http://localhost:6333/healthz
+docker inspect legal-agent-qdrant \
+  --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{end}}'
+```
+
+Mount phải trỏ từ `D:\legal-agent-rag\data\qdrant_storage` tới
+`/qdrant/storage`.
+
+### 6. Ingest shards vào Qdrant
+
+```bash
+cd /mnt/d/legal-agent-rag
+conda activate legal_rag_agent
+python scripts/modal_shards_to_qdrant.py
+```
+
+Script sẽ:
+
+1. Đọc dense embedding float16 từ từng shard.
+2. Tạo BM25 sparse vector trên CPU.
+3. Upload dense + sparse + payload vào Qdrant.
+4. Lưu checkpoint tại
+   `data/embedding_shards/qdrant_checkpoint.json`.
+5. Bật HNSW `m=16`, `on_disk=True` sau khi hoàn tất.
+
+Nếu ingest local bị dừng, chạy lại cùng lệnh để resume.
+
+### 7. Kiểm tra collection
+
+```bash
+curl http://localhost:6333/collections/legal_agent_rag
+```
+
+Kiểm tra `points_count` đạt khoảng `1.008.658`, collection có named vector
+`dense`, sparse vector `sparse`, và optimizer không báo lỗi.
+
+Sau khi xác nhận search hoạt động, có thể xóa `data/embedding_shards` để giải
+phóng dung lượng. Nên giữ shards nếu muốn rebuild Qdrant mà không chạy Modal
+lần nữa.
+
 ## Test
 
 ```bash

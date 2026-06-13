@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import os
 import uuid
+from typing import Any
 
 import pyarrow.parquet as pq
 from qdrant_client import QdrantClient, models
@@ -10,45 +13,57 @@ from src.common.config import settings
 from src.common.embedding import embed_text, load_model
 
 
-def to_sparse_vector(values: dict) -> models.SparseVector:
-    items = sorted(
-        (int(index), float(weight))
-        for index, weight in values.items()
-        if weight
-    )
-    return models.SparseVector(
-        indices=[index for index, _ in items],
-        values=[weight for _, weight in items],
-    )
+DEFAULT_UPSERT_BATCH_SIZE = int(os.getenv("QDRANT_UPSERT_BATCH_SIZE", "1"))
+DEFAULT_MAX_COLBERT_VECTORS = int(os.getenv("COLBERT_MAX_VECTORS", "64"))
 
 
-def create_collection(
+def to_sparse_vector(values: Any) -> models.SparseVector:
+    if isinstance(values, models.SparseVector):
+        return values
+
+    if isinstance(values, dict) and "indices" in values and "values" in values:
+        return models.SparseVector(
+            indices=[int(i) for i in values["indices"]],
+            values=[float(v) for v in values["values"]],
+        )
+
+    if isinstance(values, dict):
+        items = [(int(i), float(v)) for i, v in values.items() if v]
+        items.sort(key=lambda x: x[0])
+        return models.SparseVector(
+            indices=[i for i, _ in items],
+            values=[v for _, v in items],
+        )
+
+    raise TypeError(f"Unsupported sparse vector format: {type(values)}")
+
+
+def ensure_collection(
     client: QdrantClient,
-    collection_name: str = settings.collection_name,
-    dense_dim: int=1024,
-    colbert_dim: int = 1024,
+    collection_name: str,
+    dense_dim: int = settings.dense_dim,
+    colbert_dim: int = settings.colbert_dim,
+    recreate: bool = False,
 ) -> None:
-    if client.collection_exists(collection_name):
+    if recreate and client.collection_exists(collection_name):
         client.delete_collection(collection_name)
-        
+
+    if client.collection_exists(collection_name):
+        return
+
     client.create_collection(
         collection_name=collection_name,
         vectors_config={
-            "dense": models.VectorParams(
-                size=dense_dim,
-                distance=models.Distance.COSINE,
-            ),
+            "dense": models.VectorParams(size=dense_dim, distance=models.Distance.COSINE),
             "colbert": models.VectorParams(
                 size=colbert_dim,
                 distance=models.Distance.COSINE,
                 multivector_config=models.MultiVectorConfig(
-                    comparator=models.MultiVectorComparator.MAX_SIM,
+                    comparator=models.MultiVectorComparator.MAX_SIM
                 ),
             ),
         },
-        sparse_vectors_config={
-            "sparse": models.SparseVectorParams(),
-        },
+        sparse_vectors_config={"sparse": models.SparseVectorParams()},
     )
 
 
@@ -58,14 +73,14 @@ def ingest_hybrid_qdrant_index(
     collection_name: str = settings.collection_name,
     batch_size: int = settings.batch_size,
     recreate_collection: bool = False,
+    dense_model: Any | None = None,
+    bge_model: Any | None = None,
 ) -> None:
-    dense_model, bge_model = load_model()
+    if dense_model is None or bge_model is None:
+        dense_model, bge_model = load_model()
     parquet = pq.ParquetFile(corpus_path)
 
-    if recreate_collection and client.collection_exists(collection_name):
-        client.delete_collection(collection_name)
-
-    collection_exists = client.collection_exists(collection_name)
+    collection_ready = client.collection_exists(collection_name) and not recreate_collection
     progress = tqdm(
         total=parquet.metadata.num_rows,
         desc="Ingest Qdrant",
@@ -82,17 +97,23 @@ def ingest_hybrid_qdrant_index(
             batch_size=batch_size,
         )
 
-        if not collection_exists:
-            create_collection(
-                client,
-                collection_name,
+        if not collection_ready:
+            ensure_collection(
+                client=client,
+                collection_name=collection_name,
                 dense_dim=len(dense[0]),
                 colbert_dim=len(colbert[0][0]),
+                recreate=recreate_collection,
             )
-            collection_exists = True
+            collection_ready = True
 
-        points = []
-        for index, row in enumerate(rows):
+        max_colbert_vectors = DEFAULT_MAX_COLBERT_VECTORS
+        points: list[models.PointStruct] = []
+        for i, row in enumerate(rows):
+            payload = json.loads(json.dumps(row, ensure_ascii=False, default=str))
+            colbert_vecs = colbert[i][:max_colbert_vectors] if max_colbert_vectors > 0 else colbert[i]
+            colbert_payload = colbert_vecs.tolist() if hasattr(colbert_vecs, "tolist") else [list(v) for v in colbert_vecs]
+
             points.append(
                 models.PointStruct(
                     id=str(
@@ -102,19 +123,20 @@ def ingest_hybrid_qdrant_index(
                         )
                     ),
                     vector={
-                        "dense": dense[index].tolist(),
-                        "sparse": to_sparse_vector(sparse[index]),
-                        "colbert": colbert[index].tolist(),
+                        "dense": dense[i].tolist(),
+                        "sparse": to_sparse_vector(sparse[i]),
+                        "colbert": colbert_payload,
                     },
-                    payload=row,
+                    payload=payload,
                 )
             )
 
-        client.upsert(
-            collection_name=collection_name,
-            points=points,
-            wait=True,
-        )
+        for start in range(0, len(points), DEFAULT_UPSERT_BATCH_SIZE):
+            client.upsert(
+                collection_name=collection_name,
+                points=points[start:start + DEFAULT_UPSERT_BATCH_SIZE],
+                wait=True,
+            )
         progress.update(len(rows))
 
     progress.close()
@@ -125,17 +147,21 @@ if __name__ == "__main__":
     try:
         print(f"Connecting to Qdrant at {settings.qdrant_url}")
         client=QdrantClient(url=settings.qdrant_url)
-        
-        print(f"Creating collection {settings.collection_name}")
-        create_collection(
-            client,
+        ensure_collection(
+            client=client,
             collection_name=settings.collection_name,
+            recreate=True,
         )
+        
+        print("Loading embedding models")
+        dense_model, bge_model = load_model()
         
         print(f"Ingesting data into collection {settings.collection_name}")
         ingest_hybrid_qdrant_index(
             client,
             recreate_collection=True,
+            dense_model=dense_model,
+            bge_model=bge_model,
         )
     finally:
         client.close()

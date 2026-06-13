@@ -50,6 +50,8 @@ data/raw/
 data/processed/
 data/indexes/
 data/cache/
+data/embedding_shards/
+data/qdrant_storage/
 data/*.parquet
 data/*.csv
 data/*.json

@@ -25,3 +25,4 @@ FlagEmbedding
 networkx
 orjson
 jsonschema
+modal==1.5.0

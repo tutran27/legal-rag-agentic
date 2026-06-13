@@ -11,7 +11,7 @@ def colbert_score(query_vectors, document_vectors) -> float:
 def colbert_rerank(
     query: str,
     candidates,
-    bge_model,
+    colbert_model,
     top_k: int = 20,
     batch_size: int = 16,
 ) -> list[Evidence]:
@@ -19,7 +19,7 @@ def colbert_rerank(
         return []
 
     texts = [candidate.text for candidate in candidates]
-    embeddings = bge_model.encode(
+    embeddings = colbert_model.encode(
         [query, *texts],
         batch_size=batch_size,
         return_dense=False,
