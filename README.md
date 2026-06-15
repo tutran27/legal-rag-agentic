@@ -1,103 +1,129 @@
 # Legal Agent RAG
 
-Hệ thống hỏi đáp pháp luật tiếng Việt theo hướng multi-agent RAG. Mục tiêu là truy hồi đúng điều luật/văn bản liên quan, chọn evidence, kiểm chứng citation và xuất kết quả cuối theo định dạng submission.
+> Hệ thống hỏi đáp pháp luật Việt Nam sử dụng hybrid retrieval, reranking và
+> multi-agent reasoning để tạo câu trả lời có căn cứ từ văn bản pháp luật.
 
-## Pipeline
+## ✨ Tổng quan
+
+Legal Agent RAG xử lý câu hỏi theo ba lớp:
+
+1. **Hiểu và lập kế hoạch**: phân tích ý định, thực thể pháp lý, filter và sinh
+   nhiều truy vấn tìm kiếm.
+2. **Truy hồi và chọn evidence**: kết hợp dense, BM25/IDF, exact search, graph,
+   context expansion, ColBERT và cross-encoder.
+3. **Sinh và kiểm chứng câu trả lời**: chọn evidence, kiểm tra độ đầy đủ, reasoning,
+   verification, format và validate kết quả.
+
+### Công nghệ chính
+
+| Thành phần | Công nghệ |
+|---|---|
+| Vector database | Qdrant |
+| Dense embedding | `mainguyen9/vietlegal-harrier-0.6b` |
+| Sparse retrieval | BM25 + Qdrant IDF |
+| Token-level rerank | BGE-M3 ColBERT |
+| Cross-encoder | `Qwen/Qwen3-Reranker-0.6B` |
+| LLM agents | Groq, mặc định `llama-3.1-8b-instant` |
+| Cloud embedding | Modal A100 80 GB |
+| Data format | Parquet, Pydantic, JSON |
+
+## 🧭 Pipeline
 
 ```mermaid
 flowchart TD
-    A[Test Question] --> B[Supervisor Agent]
-    B --> C[Legal Understanding Agent]
-    C --> D[Query Planner Agent]
+    A["Câu hỏi"] --> B["Legal Understanding"]
+    B --> C["Query Planner"]
 
-    D --> E[Retrieval Router]
+    C --> D1["Hybrid: Dense + BM25/IDF"]
+    C --> D2["Exact Search"]
+    C --> D3["Summary Search (tùy chọn)"]
 
-    E --> R1[Exact Search<br/>mã văn bản / điều / từ khóa]
-    E --> R2[BM25 Search]
-    E --> R3[Dense Retrieval<br/>Fine-tuned BGE-M3]
-    E --> R4[Sparse Retrieval<br/>BGE-M3 sparse / SPLADE]
-    E --> R5[ColBERT / Multi-vector Retrieval]
-    E --> R6[Legal Graph Retrieval]
-    E --> R7[Summary / RAPTOR / LightRAG Retrieval]
+    D1 --> E["Weighted RRF Fusion"]
+    D2 --> E
+    D3 --> E
 
-    R1 --> F[Candidate Fusion<br/>Weighted RRF + Vote Boost]
-    R2 --> F
-    R3 --> F
-    R4 --> F
-    R5 --> F
-    R6 --> F
-    R7 --> F
+    E --> F["Chọn seed"]
+    F --> G1["Legal Graph Expansion"]
+    F --> G2["Context Expansion"]
 
-    F --> G[Legal Filter<br/>hiệu lực / lĩnh vực / loại văn bản]
-    G --> H[Article-level Reranker]
-    H --> I[Context Expansion<br/>Điều → Khoản → Điểm → Văn bản cha]
-    I --> J[Evidence Selector Agent]
+    E --> H["Expanded Fusion"]
+    G1 --> H
+    G2 --> H
 
-    J --> K{Evidence đủ mạnh?}
+    H --> I["ColBERT: 100 → 60"]
+    I --> J["Cross-encoder: 60 → 40"]
+    J --> K["Final top 20"]
 
-    K -- Không --> D
-    K -- Có --> L[Legal Reasoning Agent]
+    K --> L["Evidence Selector"]
+    L --> M{"Evidence đủ?"}
+    M -- "Có" --> N["Legal Reasoner"]
+    M -- "Không" --> X["Kết quả chưa đủ căn cứ"]
 
-    L --> M[Citation Verifier Agent]
-    M --> N{Answer khớp evidence?}
-
-    N -- Không --> L
-    N -- Có --> O[Submission Formatter Agent]
-
-    O --> P[JSON Schema Validator]
-    P --> Q[results.json]
-    Q --> Z[results.zip phẳng]
+    N --> O["Verifier"]
+    O --> P{"Đạt?"}
+    P -- "Không" --> N
+    P -- "Có" --> Q["Submission Formatter"]
+    Q --> R["JSON Schema Validator"]
+    R --> S["results.json"]
+    S --> T["results.zip"]
 ```
 
-Luồng chính:
-
-```text
-Question
--> Legal Understanding
--> Query Planning
--> Multi-retrieval
--> Fusion + Filter + Rerank
--> Evidence Selection
--> Legal Reasoning
--> Citation Verification
--> results.json
--> results.zip
-```
-
-## Trạng thái hiện tại
+## ✅ Trạng thái triển khai
 
 Đã có:
 
-- Download dữ liệu từ Hugging Face.
-- Process dữ liệu Pháp điển.
-- Process metadata và quan hệ văn bản VBPL.
-- Schema cho `LegalDocument`, `LegalArticle`, `LegalEdge`.
-- Tạo `legal_units.parquet`.
-- Dense indexing lên Qdrant.
+- Xử lý dữ liệu VBPL và Pháp điển.
+- Article-aware chunking và submission mapping.
+- Dense + BM25 sparse index trong Qdrant.
+- Exact, hybrid, graph, summary retrieval và context expansion.
+- Weighted RRF fusion, ColBERT và cross-encoder rerank.
+- Legal Understanding, Query Planner, Evidence Selector, Sufficiency Checker,
+  Reasoner, Verifier và Formatter.
+- Validation `results.json` và tạo ZIP phẳng.
+- Checkpoint cho Modal embedding và local Qdrant ingest.
 
-Đang cần triển khai tiếp:
+Giới hạn hiện tại:
 
-- Các retriever: exact, BM25, sparse, ColBERT, graph.
-- Fusion, reranker, context expansion.
-- Các agent: supervisor, planner, evidence selector, reasoner, verifier, formatter.
-- Validator và đóng gói submission.
+- `scripts/03_run_inference.py` đang dùng câu hỏi hard-code, chưa nhận `--query`.
+- Sufficiency chưa tự chạy lại toàn bộ retrieval với query mới.
+- Summary retrieval có implementation nhưng mặc định tắt.
+- Chưa có supervisor orchestration riêng và benchmark chính thức.
 
-## Cấu trúc repo
+## 📁 Cấu trúc repository
 
 ```text
-configs/       Cấu hình data/model/retrieval/eval
-scripts/       Script chạy pipeline
-src/data/      Download, process, chuẩn hóa dữ liệu
-src/schema/    Pydantic schema
-src/indexing/  Build index
-src/retrieval/ Retriever
-src/agents/    Multi-agent workflow
-src/eval/      Evaluation
-src/submission Build, validate, zip kết quả
-tests/         Unit tests
+scripts/
+├── 01_download_data.py
+├── 02_process_data.py
+├── 03_run_inference.py
+├── 04_build_submission.py
+├── 05_create_payload_indexes.py
+├── modal_ingest.py
+├── modal_shards_to_qdrant.py
+└── monitor_ingest_and_shutdown.ps1
+
+src/
+├── agents/       Agent và prompt nghiệp vụ
+├── chunking/     Tạo retrieval corpus
+├── common/       Config, embedding và BM25
+├── data/         Download và chuẩn hóa dữ liệu
+├── generation/   Groq LLM client
+├── indexing/     Graph index và Qdrant collection
+├── retrieval/    Retrieval, fusion, expansion và rerank
+├── schema/       Pydantic schema
+└── submission/   Validate, ghi và nén kết quả
+
+tests/            Unit test
 ```
 
-## Cài đặt
+## ⚙️ Cài đặt
+
+Yêu cầu:
+
+- Python 3.11
+- Docker Desktop
+- WSL2 được khuyến nghị khi chạy pipeline và GPU local
+- NVIDIA GPU nếu chạy reranker local
 
 ```bash
 conda create -n legal_rag_agent python=3.11
@@ -105,61 +131,60 @@ conda activate legal_rag_agent
 pip install -r requirements.txt
 ```
 
-Nếu dùng Qdrant:
+Tạo `.env`:
 
-```bash
-docker run -p 6333:6333 qdrant/qdrant
+```env
+GROQ_API_KEY=your-groq-api-key
+HF_TOKEN=your-huggingface-read-token
+
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION=legal_agent_rag_harrier_idf
+
+# Tùy chọn
+DENSE_MODEL=mainguyen9/vietlegal-harrier-0.6b
+COLBERT_MODEL=BAAI/bge-m3
+QDRANT_TIMEOUT=120
 ```
 
-## Tải và xử lý dữ liệu
+Không commit `.env`, token, embedding shards hoặc Qdrant storage.
 
-Chạy các lệnh từ thư mục gốc của repository.
+## 📥 Chuẩn bị dữ liệu
 
-### 1. Tải dữ liệu
+Chạy các lệnh từ thư mục gốc repository.
+
+### 1. Download
 
 ```bash
 python scripts/01_download_data.py
 ```
 
-Script tải các nguồn Hugging Face vào `data/raw/`:
+Dữ liệu được tải vào `data/raw/` từ:
 
-- Pháp điển: `tmquan/phapdien-moj-gov-vn`.
-- Văn bản pháp luật: `th1nhng0/vietnamese-legal-documents`.
-- VBPL Markdown: `tmquan/vbpl-vn`.
-- Legal instruction: `duyet/vietnamese-legal-instruct`.
+- `tmquan/phapdien-moj-gov-vn`
+- `th1nhng0/vietnamese-legal-documents`
+- `tmquan/vbpl-vn`
+- `duyet/vietnamese-legal-instruct`
 
-Dữ liệu có dung lượng lớn, cần bảo đảm đủ dung lượng ổ đĩa và kết nối
-mạng ổn định.
-
-### 2. Build dataset retrieval
+### 2. Process
 
 ```bash
 python scripts/02_process_data.py
 ```
 
-Script lần lượt:
-
-1. Chuẩn hóa metadata văn bản VBPL.
-2. Tách nội dung VBPL thành từng Điều.
-3. Tạo quan hệ giữa các văn bản.
-4. Chuẩn hóa dữ liệu Pháp điển.
-5. Hợp nhất VBPL và Pháp điển thành `legal_units`.
-6. Chia Điều dài thành retrieval chunks.
-7. Tạo mapping dùng cho submission.
-
-Các file đầu ra nằm trong `data/processed/`:
+Pipeline tạo:
 
 ```text
-documents.parquet
-vbpl_articles.parquet
-legal_edges.parquet
-phapdien-moj-gov-vn.parquet
-legal_units.parquet
-retrieval_corpus.parquet
-submission_mapping.parquet
+data/processed/
+├── documents.parquet
+├── vbpl_articles.parquet
+├── legal_edges.parquet
+├── phapdien-moj-gov-vn.parquet
+├── legal_units.parquet
+├── retrieval_corpus.parquet
+└── submission_mapping.parquet
 ```
 
-Để chạy riêng từng bước:
+Các bước có thể chạy riêng:
 
 ```bash
 python -m src.data.process_vbpl
@@ -167,100 +192,68 @@ python -m src.data.process_phapdien
 python -m src.data.build_legal_units
 python -m src.chunking.build_retrieval_corpus
 python -m src.data.build_submission_mapping
+python -m src.indexing.build_graph
 ```
 
-## Tạo embedding trên Modal và ingest Qdrant Docker
+## ☁️ Tạo embedding trên Modal
 
-Pipeline:
+Modal sử dụng A100 80 GB, 16 CPU, 64 GB RAM và timeout 24 giờ. Batch bắt đầu từ
+`8192`, tự giảm dần đến `128` nếu thiếu VRAM.
 
-```text
-retrieval_corpus.parquet
-        |
-        v
-Modal A100 80GB tạo dense embedding float16
-        |
-        v
-Modal Volume: embedding_shards/part-*.parquet
-        |
-        v
-data/embedding_shards trên ổ D
-        |
-        v
-Qdrant Docker: data/qdrant_storage trên ổ D
-```
-
-`data/embedding_shards` là Parquet trung gian. `data/qdrant_storage` là
-database nội bộ của Qdrant gồm vector segments, BM25, WAL và HNSW. Không mount
-thư mục shard trực tiếp vào `/qdrant/storage`.
-
-### 1. Chuẩn bị Modal trong WSL
+### 1. Đăng nhập và tạo secret
 
 ```bash
-cd /mnt/d/legal-agent-rag
-conda activate legal_rag_agent
-pip install -r requirements.txt
 modal token new
-```
 
-Tạo secret chứa Hugging Face token quyền `Read`:
-
-```bash
 modal secret create legal-rag-secrets \
   HF_TOKEN="YOUR-HF-TOKEN"
 ```
 
-Không ghi token thật vào README, source code, log hoặc Git. Nếu token đã từng
-bị công khai, phải thu hồi và tạo token mới.
-
-### 2. Upload corpus lên Modal Volume
+### 2. Upload corpus
 
 ```bash
 modal run scripts/modal_ingest.py --action upload
 ```
 
-Corpus được lưu trong Modal Volume `legal-rag-ingest-data`.
-
-### 3. Tạo embedding bằng A100 80GB
-
-Chạy mới và xóa checkpoint/shard cũ:
+Đổi đường dẫn corpus khi cần:
 
 ```bash
-modal run --detach scripts/modal_ingest.py --action start --recreate
+modal run scripts/modal_ingest.py \
+  --action upload \
+  --corpus data/processed/retrieval_corpus.parquet
 ```
 
-Job thử batch từ `8192` và tự giảm đến `128` khi thiếu VRAM. Batch ổn định
-thực tế trên A100 80GB là `2048`.
+### 3. Chạy embedding
 
-Nếu job bị preempt, hết spending limit hoặc dừng giữa chừng, resume bằng:
+Chạy mới và xóa checkpoint cũ:
+
+```bash
+modal run --detach scripts/modal_ingest.py \
+  --action start \
+  --recreate
+```
+
+Resume:
 
 ```bash
 modal run --detach scripts/modal_ingest.py --action start
 ```
 
-Không dùng `--recreate` khi resume. Checkpoint được lưu theo Parquet row group.
-
 Theo dõi:
 
 ```bash
-modal app list
 modal app logs legal-rag-embedding -f
 modal volume ls legal-rag-ingest-data /embedding_shards
 ```
 
-Khi hoàn thành phải có `101` file từ `part-0000.parquet` đến
-`part-0100.parquet`.
-
-### 4. Tải embedding shards về ổ D
+### 4. Tải shards
 
 ```bash
-cd /mnt/d/legal-agent-rag
 modal volume get \
   legal-rag-ingest-data \
   /embedding_shards \
   data/embedding_shards
 ```
-
-Không tải vào `/home/...` vì WSL virtual disk thường nằm trên ổ C.
 
 Kiểm tra:
 
@@ -269,109 +262,183 @@ find data/embedding_shards -name "part-*.parquet" | wc -l
 du -sh data/embedding_shards
 ```
 
-Số file phải là `101`.
+## 🗄️ Qdrant local
 
-### 5. Chạy Qdrant Docker local
+### 1. Khởi động
 
-`docker-compose.yml` bind mount Qdrant storage vào:
+```bash
+docker compose up -d
+curl http://localhost:6333/healthz
+```
+
+`docker-compose.yml` hiện bind mount:
 
 ```text
-D:\legal-agent-rag\data\qdrant_storage
+D:/legal-agent-rag/data/qdrant_storage → /qdrant/storage
 ```
 
-Khởi động:
+Nếu clone repository sang vị trí khác, cần sửa `source` trong
+`docker-compose.yml`.
+
+### 2. Ingest shards
+
+Tạo lại collection từ đầu:
 
 ```bash
-docker compose down
-docker compose up -d
+python -m scripts.modal_shards_to_qdrant --recreate
 ```
 
-Kiểm tra:
+Resume sau khi dừng:
 
 ```bash
-curl http://localhost:6333/healthz
-docker inspect legal-agent-qdrant \
-  --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{end}}'
+python -m scripts.modal_shards_to_qdrant
 ```
 
-Mount phải trỏ từ `D:\legal-agent-rag\data\qdrant_storage` tới
-`/qdrant/storage`.
-
-### 6. Ingest shards vào Qdrant
+Chỉ định thư mục khác:
 
 ```bash
-cd /mnt/d/legal-agent-rag
-conda activate legal_rag_agent
-python scripts/modal_shards_to_qdrant.py
+python -m scripts.modal_shards_to_qdrant \
+  --shards-dir data/embedding_shards_harrier
 ```
 
-Script sẽ:
-
-1. Đọc dense embedding float16 từ từng shard.
-2. Tạo BM25 sparse vector trên CPU.
-3. Upload dense + sparse + payload vào Qdrant.
-4. Lưu checkpoint tại
-   `data/embedding_shards/qdrant_checkpoint.json`.
-5. Bật HNSW `m=16`, `on_disk=True` sau khi hoàn tất.
-
-Nếu ingest local bị dừng, chạy lại cùng lệnh để resume.
-
-### 7. Kiểm tra collection
+Ingest và bật HNSW sau khi hoàn thành:
 
 ```bash
+python -m scripts.modal_shards_to_qdrant \
+  --recreate \
+  --build-hnsw
+```
+
+Lưu ý:
+
+- Trong lúc ingest, collection dùng `HNSW m=0` và `indexing_threshold=0`.
+- HNSW chỉ được bật thành `m=16` khi có flag `--build-hnsw`.
+- Checkpoint nằm trong `<shards-dir>/qdrant_checkpoint.json`.
+- Sparse vector được tạo bằng BM25; Qdrant áp dụng IDF ở collection.
+
+### 3. Tạo payload indexes
+
+Chạy sau khi collection đã tồn tại:
+
+```bash
+python scripts/05_create_payload_indexes.py
+```
+
+Các index:
+
+| Field | Type |
+|---|---|
+| `is_current` | bool |
+| `doc_code` | keyword |
+| `doc_type` | keyword |
+| `domain` | keyword |
+| `sector` | keyword |
+
+### 4. Kiểm tra collection
+
+```bash
+curl http://localhost:6333/collections
 curl http://localhost:6333/collections/legal_agent_rag_harrier_idf
 ```
 
-Kiểm tra `points_count` đạt khoảng `1.008.658`, collection có named vector
-`dense`, sparse vector `sparse`, và optimizer không báo lỗi.
+Collection hiện tại dự kiến có khoảng `1.008.658` points.
 
-Sau khi xác nhận search hoạt động, có thể xóa `data/embedding_shards` để giải
-phóng dung lượng. Nên giữ shards nếu muốn rebuild Qdrant mà không chạy Modal
-lần nữa.
-
-### Qdrant báo mất collection sau khi WSL restart
-
-Khi Qdrant dùng bind mount từ `/mnt/d`, Docker đôi lúc vẫn báo mount đúng nhưng
-`/qdrant/storage` bên trong container lại trở thành `tmpfs` rỗng. Collection lúc
-đó không xuất hiện, dù dữ liệu cũ vẫn còn trong:
-
-```text
-D:\legal-agent-rag\data\qdrant_storage
-```
-
-Kiểm tra:
+### Khắc phục Qdrant mount nhầm `tmpfs`
 
 ```bash
 docker exec legal-agent-qdrant df -T /qdrant/storage
 docker exec legal-agent-qdrant du -sh /qdrant/storage
-du -sh data/qdrant_storage
-curl http://localhost:6333/collections
 ```
 
-Nếu container hiển thị `tmpfs` và chỉ có vài KB, trong khi thư mục host vẫn
-khoảng `7.9G`, hãy tạo lại container:
+Nếu `/qdrant/storage` là `tmpfs` rỗng nhưng dữ liệu trên ổ D vẫn còn:
 
 ```bash
 docker compose down
 docker compose up -d --force-recreate
 ```
 
-Sau đó kiểm tra lại:
+Không chạy `docker compose down -v` nếu chưa chắc chắn về dữ liệu cần giữ.
+
+## 🔎 Chạy inference
 
 ```bash
-docker exec legal-agent-qdrant du -sh /qdrant/storage
-curl http://localhost:6333/collections
+python scripts/03_run_inference.py
 ```
 
-Không chạy `docker compose down -v`, vì tùy cấu hình lệnh này có thể xóa volume.
-Nếu lỗi lặp lại, nên chuyển Qdrant storage sang Docker named volume hoặc
-filesystem ext4 của WSL. Bind mount từ ổ Windows qua `/mnt/d` không ổn định cho
-database sử dụng mmap như Qdrant.
+Script sẽ:
 
-## Test
+1. Load dense model, ColBERT và cross-encoder.
+2. Chạy understanding và query planning.
+3. Hybrid retrieval cho ba query.
+4. Fusion, graph và context expansion.
+5. ColBERT `100 → 60`, cross-encoder `60 → 40`, lấy top `20`.
+6. Chọn tối đa `5` evidence.
+7. Sufficiency check, reasoning và verification.
+8. Validate citation và ghi `results.json`.
+9. In latency của từng bước.
+
+Để thay câu hỏi, hiện cần sửa biến `query` trong `main()` của
+`scripts/03_run_inference.py`.
+
+## 📦 Validate và đóng gói
 
 ```bash
-pytest
+python scripts/04_build_submission.py
 ```
 
-Một số test yêu cầu đã có dữ liệu trong `data/processed/`.
+Hoặc chỉ định đường dẫn:
+
+```bash
+python scripts/04_build_submission.py \
+  --input results.json \
+  --output results.zip
+```
+
+Script kiểm tra Pydantic schema rồi tạo ZIP phẳng:
+
+```text
+results.zip
+└── results.json
+```
+
+## 🧪 Kiểm thử
+
+```bash
+pytest -q
+```
+
+Chạy nhóm test cụ thể:
+
+```bash
+pytest tests/test_retrieval.py -q
+pytest tests/test_reasoner.py tests/test_verifier.py -q
+pytest tests/test_validate_results.py tests/test_zip_results.py -q
+```
+
+Một số test xử lý dữ liệu cần các file trong `data/processed/`.
+
+## 🔐 Dữ liệu không được commit
+
+```text
+.env
+data/raw/
+data/processed/
+data/embedding_shards*/
+data/qdrant_storage/
+results.json
+results.zip
+*.parquet
+*.pt
+*.bin
+*.safetensors
+*.log
+```
+
+## 🛣️ Hướng phát triển
+
+- Nhận câu hỏi từ CLI/API thay vì hard-code.
+- Supervisor điều phối retry retrieval có giới hạn.
+- Benchmark retrieval, article recall và answer quality.
+- Claim-level citation verification.
+- Batch inference cho tập câu hỏi và submission mapping đầy đủ.
+- Cấu hình Docker storage không phụ thuộc đường dẫn ổ D.

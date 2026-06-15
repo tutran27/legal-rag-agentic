@@ -3,7 +3,7 @@ from qdrant_client import QdrantClient, models
 from src.common.bm25 import bm25_vector
 from src.common.config import settings
 from src.common.embedding import embed_dense
-from src.retrieval.bm25_retriever import colbert_rerank
+from src.retrieval.colbert_reranker import colbert_rerank
 from src.retrieval.cross_encoder_rerank import cross_encoder_rerank
 from src.schema.agent_schemas import Evidence
 

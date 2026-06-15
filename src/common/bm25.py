@@ -1,6 +1,7 @@
 import re
 import zlib
 from collections import Counter
+from collections.abc import Iterable
 
 from qdrant_client import models
 
@@ -30,7 +31,7 @@ def bm25_vector(text: str, avg_length: float | None = None) -> models.SparseVect
     )
 
 
-def average_length(texts) -> float:
+def average_length(texts: Iterable[str]) -> float:
     total = count = 0
     for text in texts:
         total += len(tokenize(text))

@@ -1,4 +1,8 @@
+import json
+from pathlib import Path
+
 from jsonschema import Draft202012Validator
+from pydantic import ValidationError
 
 from src.schema.agent_schemas import Evidence, SubmissionItem
 
@@ -39,3 +43,21 @@ def validate_submission_item(
             f"docs={sorted(invalid_docs)}, "
             f"articles={sorted(invalid_articles)}"
         )
+
+
+def load_and_validate_results(
+    input_path: str | Path = "results.json",
+) -> list[SubmissionItem]:
+    path = Path(input_path)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as error:
+        raise ValueError(f"Không đọc được {path}: {error}") from error
+
+    if not isinstance(data, list):
+        raise ValueError("results.json phải là một danh sách.")
+
+    try:
+        return [SubmissionItem.model_validate(item) for item in data]
+    except ValidationError as error:
+        raise ValueError(f"results.json không đúng schema: {error}") from error

@@ -17,7 +17,7 @@ from src.agents.sufficiency_checker import SufficiencyCheckerAgent
 from src.agents.verifier import VerificationAgent
 from src.common.embedding import load_colbert_model, load_dense_model
 from src.generation.llm_service import GroqLLMClient
-from src.retrieval.bm25_retriever import colbert_rerank
+from src.retrieval.colbert_reranker import colbert_rerank
 from src.retrieval.context_expander import expand_context
 from src.retrieval.cross_encoder_rerank import cross_encoder_rerank
 from src.retrieval.exact_retriever import exact_search

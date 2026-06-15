@@ -66,8 +66,8 @@ def test_reasoner_uses_selected_evidence_and_metadata():
     assert payload["evidence"][0]["role"] == "main"
     assert payload["evidence"][0]["selection_reason"] == "Quy định trực tiếp."
     assert payload["evidence"][0]["text"] == "Nội dung pháp lý chính."
-    assert "không được lược bỏ các chi tiết cần thiết" in llm.system_prompt
-    assert "thứ tự ưu tiên, ngoại lệ, giới hạn và thủ tục" in llm.system_prompt
+    assert "lấy ra những thông tin phù hợp trực tiếp" in llm.system_prompt
+    assert "Ưu tiên điều kiện, đối tượng, ngoại lệ và thủ tục" in llm.system_prompt
 
 
 def test_reasoner_stops_when_evidence_is_insufficient():
