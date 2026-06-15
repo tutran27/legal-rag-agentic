@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
+import torch
 
+from src.common.config import settings
 from src.schema.agent_schemas import Evidence
 
 
@@ -17,18 +19,26 @@ def colbert_rerank(
     candidates,
     colbert_model,
     top_k: int = 50,
-    batch_size: int = 8,
+    batch_size: int = settings.colbert_batch_size,
 ) -> list[Evidence]:
     if not candidates:
         return []
 
-    embeddings = colbert_model.encode(
-        [query, *[candidate.text for candidate in candidates]],
-        batch_size=batch_size,
-        return_dense=False,
-        return_sparse=False,
-        return_colbert_vecs=True,
-    )["colbert_vecs"]
+    documents = [
+        (
+            f"{candidate.metadata.get('article_title') or ''}\n"
+            f"{candidate.metadata.get('content_text') or candidate.text}"
+        )[:settings.rerank_max_chars]
+        for candidate in candidates
+    ]
+    with torch.inference_mode():
+        embeddings = colbert_model.encode(
+            [query, *documents],
+            batch_size=batch_size,
+            return_dense=False,
+            return_sparse=False,
+            return_colbert_vecs=True,
+        )["colbert_vecs"]
 
     query_vectors = embeddings[0]
     scored = [

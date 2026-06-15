@@ -55,13 +55,13 @@ class RetrievalPlan(BaseModel):
     use_context: bool = True
     use_summary: bool = False
 
-    top_k_exact: int = 50
-    top_k_bm25: int = 100
-    top_k_dense: int = 100
-    top_k_sparse: int = 100
-    top_k_colbert: int = 60
-    top_k_cross_encoder: int = 40
-    top_k_graph: int = 50
+    top_k_exact: int = 20
+    top_k_bm25: int = 80
+    top_k_dense: int = 80
+    top_k_sparse: int = 80
+    top_k_colbert: int = 40
+    top_k_cross_encoder: int = 20
+    top_k_graph: int = 10
     top_k_summary: int = 30
 
 
@@ -69,6 +69,11 @@ class QueryPlan(BaseModel):
     queries: list[SearchQuery]
     filters: RetrievalFilter = Field(default_factory=RetrievalFilter)
     retrieval: RetrievalPlan = Field(default_factory=RetrievalPlan)
+
+
+class PlanningResult(BaseModel):
+    understanding: LegalUnderstanding
+    plan: QueryPlan
 
 
 class Evidence(BaseModel):
@@ -116,6 +121,11 @@ class SufficiencyReport(BaseModel):
     next_queries: list[str] = Field(default_factory=list)
 
 
+class EvidenceAssessment(BaseModel):
+    selection: EvidenceSelectionResult
+    sufficiency: SufficiencyReport
+
+
 class AnswerDraft(BaseModel):
     answer: str
 
@@ -134,6 +144,14 @@ class SubmissionItem(BaseModel):
     answer: str
     relevant_docs: list[str]
     relevant_articles: list[str]
+
+
+class InferenceResult(BaseModel):
+    submission: SubmissionItem
+    final_candidates: list[Evidence] = Field(default_factory=list)
+    selected_evidence: list[Evidence] = Field(default_factory=list)
+    verification: VerificationReport
+    latencies: dict[str, float] = Field(default_factory=dict)
 
 
 class AgentState(BaseModel):

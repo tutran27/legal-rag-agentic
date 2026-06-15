@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import pickle
 import re
+from functools import lru_cache
 from pathlib import Path
 
 import pyarrow.dataset as ds
+from qdrant_client import QdrantClient, models
 
+from src.common.bm25 import bm25_vector
+from src.common.config import settings
+from src.retrieval.qdrant_payload import PAYLOAD_FIELDS, payload_to_evidence
 from src.schema.agent_schemas import Evidence
 
 
@@ -28,6 +33,12 @@ def _tokens(text: str) -> set[str]:
     }
 
 
+@lru_cache(maxsize=1)
+def load_graph(graph_path: str):
+    with Path(graph_path).open("rb") as file:
+        return pickle.load(file)
+
+
 def graph_search(
     query: str,
     candidates: list[Evidence],
@@ -36,12 +47,12 @@ def graph_search(
     top_k: int = 50,
     current_only: bool = True,
     max_related_docs: int = 30,
+    client: QdrantClient | None = None,
 ) -> list[Evidence]:
     if not candidates:
         return []
 
-    with Path(graph_path).open("rb") as file:
-        graph = pickle.load(file)
+    graph = load_graph(graph_path)
 
     related_docs = {}
     seed_doc_ids = {
@@ -95,19 +106,51 @@ def graph_search(
             reverse=True,
         )[:max_related_docs]
     )
-    dataset = ds.dataset(corpus_path, format="parquet")
-    condition = ds.field("doc_id").isin(list(related_docs))
-    if current_only:
-        condition &= ds.field("is_current") == True
-
-    rows = dataset.to_table(filter=condition).to_pylist()
+    if client is not None:
+        conditions = [
+            models.FieldCondition(
+                key="doc_id",
+                match=models.MatchAny(any=list(related_docs)),
+            )
+        ]
+        if current_only:
+            conditions.append(
+                models.FieldCondition(
+                    key="is_current",
+                    match=models.MatchValue(value=True),
+                )
+            )
+        response = client.query_points(
+            collection_name=settings.collection_name,
+            query=bm25_vector(query),
+            using="sparse",
+            query_filter=models.Filter(must=conditions),
+            limit=max(top_k * 3, 30),
+            with_payload=PAYLOAD_FIELDS,
+            with_vectors=False,
+            timeout=settings.qdrant_timeout,
+        )
+        rows = [
+            (point.payload or {}, float(point.score))
+            for point in response.points
+            if point.payload
+        ]
+    else:
+        dataset = ds.dataset(corpus_path, format="parquet")
+        condition = ds.field("doc_id").isin(list(related_docs))
+        if current_only:
+            condition &= ds.field("is_current") == True
+        rows = [
+            (row, None)
+            for row in dataset.to_table(filter=condition).to_pylist()
+        ]
     if not rows:
         return []
 
     query_tokens = _tokens(query)
 
     results = []
-    for row in rows:
+    for row, retrieval_score in rows:
         graph_info = related_docs[row["doc_id"]]
         text = " ".join(
             [
@@ -116,27 +159,19 @@ def graph_search(
             ]
         )
         text_tokens = _tokens(text)
-        overlap = len(query_tokens & text_tokens) / max(len(query_tokens), 1)
+        overlap = (
+            retrieval_score
+            if retrieval_score is not None
+            else len(query_tokens & text_tokens) / max(len(query_tokens), 1)
+        )
         score = graph_info["score"] + overlap
+        metadata = {
+            **row,
+            "relation_type": graph_info["relation"],
+            "seed_doc_id": graph_info["seed_doc_id"],
+        }
         results.append(
-            Evidence(
-                unit_id=row["unit_id"],
-                chunk_id=row["chunk_id"],
-                text=row["text"],
-                doc_code=row["doc_code"],
-                doc_title_submission=row["doc_title_submission"],
-                article=row["article"],
-                article_title=row["article_title"],
-                source="graph",
-                chunk_type=row["chunk_type"],
-                score=score,
-                final_score=score,
-                metadata={
-                    **row,
-                    "relation_type": graph_info["relation"],
-                    "seed_doc_id": graph_info["seed_doc_id"],
-                },
-            )
+            payload_to_evidence(metadata, source="graph", score=score)
         )
 
     results.sort(key=lambda item: item.final_score, reverse=True)

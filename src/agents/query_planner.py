@@ -2,7 +2,12 @@ import json
 import re
 from typing import Any
 
-from src.schema.agent_schemas import LegalUnderstanding, QueryPlan, SearchQuery
+from src.schema.agent_schemas import (
+    LegalUnderstanding,
+    PlanningResult,
+    QueryPlan,
+    SearchQuery,
+)
 
 
 LEGAL_CONTEXTS = {
@@ -94,13 +99,13 @@ Chỉ trả JSON theo schema:
     "use_graph": true,
     "use_context": true,
     "use_summary": false,
-    "top_k_exact": 50,
-    "top_k_bm25": 100,
-    "top_k_dense": 100,
-    "top_k_sparse": 100,
-    "top_k_colbert": 60,
-    "top_k_cross_encoder": 40,
-    "top_k_graph": 50,
+    "top_k_exact": 20,
+    "top_k_bm25": 80,
+    "top_k_dense": 80,
+    "top_k_sparse": 80,
+    "top_k_colbert": 40,
+    "top_k_cross_encoder": 20,
+    "top_k_graph": 10,
     "top_k_summary": 30
   }
 }
@@ -118,7 +123,96 @@ Chỉ trả JSON theo schema:
             temperature=0.1,
         )
 
-        plan = QueryPlan(**data)
+        return self._normalize_plan(
+            question,
+            understanding,
+            QueryPlan(**data),
+        )
+
+    def run_combined(self, question: str) -> PlanningResult:
+        prompt = """
+Bạn là agent phân tích và lập kế hoạch retrieval cho Legal RAG Việt Nam.
+
+Trong một lần xử lý:
+1. Phân tích domain, intent, thực thể pháp lý và yêu cầu hiệu lực.
+2. Tạo đúng 3 query: original, legal_rewrite và keyword.
+3. Tạo filter và retrieval plan.
+
+Quy tắc:
+- original giữ nguyên câu hỏi.
+- legal_rewrite là lệnh đề pháp lý ngắn, không có dấu hỏi.
+- keyword là cụm từ khóa BM25 ngắn, không trùng legal_rewrite.
+- Chỉ đặt doc_codes khi câu hỏi nêu rõ số hiệu văn bản.
+- Chỉ đặt taxonomy khi chắc chắn; mặc định is_current=true.
+
+Chỉ trả JSON:
+{
+  "understanding": {
+    "domain": "...",
+    "intent": "condition_question | obligation_question | procedure_question | penalty_question | definition_question | rights_question | document_lookup | other",
+    "answer_type": "...",
+    "legal_entities": ["..."],
+    "likely_docs": ["..."],
+    "sub_questions": ["..."],
+    "missing_facts": ["..."],
+    "time_context": "hiện hành",
+    "need_effective_check": true
+  },
+  "plan": {
+    "queries": [
+      {"query_type": "original", "text": "...", "reason": "..."},
+      {"query_type": "legal_rewrite", "text": "...", "reason": "..."},
+      {"query_type": "keyword", "text": "...", "reason": "..."}
+    ],
+    "filters": {
+      "doc_codes": [],
+      "doc_types": [],
+      "domains": [],
+      "sectors": [],
+      "is_current": true
+    },
+    "retrieval": {
+      "use_exact": true,
+      "use_bm25": true,
+      "use_dense": true,
+      "use_sparse": true,
+      "use_colbert": true,
+      "use_cross_encoder": true,
+      "use_graph": true,
+      "use_context": true,
+      "use_summary": false,
+      "top_k_exact": 20,
+      "top_k_bm25": 80,
+      "top_k_dense": 80,
+      "top_k_sparse": 80,
+      "top_k_colbert": 40,
+      "top_k_cross_encoder": 20,
+      "top_k_graph": 10,
+      "top_k_summary": 30
+    }
+  }
+}
+"""
+        data = self.llm.call_llm_json(
+            query=question,
+            system_prompt=prompt,
+            max_new_tokens=2048,
+            temperature=0.1,
+        )
+        result = PlanningResult(**data)
+        plan = self._normalize_plan(
+            question,
+            result.understanding,
+            result.plan,
+        )
+        return result.model_copy(update={"plan": plan})
+
+    def _normalize_plan(
+        self,
+        question: str,
+        understanding: LegalUnderstanding,
+        plan: QueryPlan,
+    ) -> QueryPlan:
         queries = {query.query_type: query for query in plan.queries}
         original_tokens = _tokens(question)
 
@@ -170,9 +264,9 @@ Chỉ trả JSON theo schema:
 
 if __name__ == "__main__":
     from src.agents.legal_understanding import LegalUnderstandingAgent
-    from src.generation.llm_service import GroqLLMClient
+    from src.generation.endpoint import EndpointLLMClient
 
-    llm = GroqLLMClient()
+    llm = EndpointLLMClient()
     question = "Doanh nghiệp SME có thể có bao nhiêu người làm việc?"
     understanding = LegalUnderstandingAgent(llm).run(question)
     plan = QueryPlannerAgent(llm).run(question, understanding)

@@ -10,7 +10,7 @@ regex
 tqdm
 pydantic
 pytest
-groq
+requests
 
 torch
 transformers

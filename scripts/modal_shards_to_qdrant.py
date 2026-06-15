@@ -11,7 +11,10 @@ from tqdm import tqdm
 
 from src.common.bm25 import average_length, bm25_vector
 from src.common.config import settings
-from src.indexing.qdrant_collection import create_collection
+from src.indexing.qdrant_collection import (
+    create_collection,
+    create_payload_indexes,
+)
 
 DEFAULT_SHARDS = Path("data/embedding_shards")
 
@@ -57,14 +60,16 @@ def main(
         ),
     )
 
-    avg_length = average_length(
-        row["text"]
-        for file in files
-        for batch in pq.ParquetFile(file).iter_batches(
-            batch_size=4096, columns=["text"]
+    avg_length = 0.0
+    if checkpoint["shard"] < len(files):
+        avg_length = average_length(
+            row["text"]
+            for file in files
+            for batch in pq.ParquetFile(file).iter_batches(
+                batch_size=4096, columns=["text"]
+            )
+            for row in batch.to_pylist()
         )
-        for row in batch.to_pylist()
-    )
 
     for shard_index, file in enumerate(
         tqdm(files[checkpoint["shard"] :], desc="Ingest shards"),
@@ -107,6 +112,11 @@ def main(
                 indexing_threshold=20_000,
                 max_optimization_threads=1,
             ),
+        )
+        create_payload_indexes(
+            client,
+            settings.collection_name,
+            wait=True,
         )
     client.close()
 

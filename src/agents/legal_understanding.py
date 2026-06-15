@@ -1,9 +1,9 @@
 from src.schema.agent_schemas import LegalUnderstanding
-from src.generation.llm_service import GroqLLMClient
+from src.generation.endpoint import EndpointLLMClient
 
 
 class LegalUnderstandingAgent:
-    def __init__(self, llm: GroqLLMClient):
+    def __init__(self, llm: EndpointLLMClient):
         self.llm = llm
 
     def run(self, question: str) -> LegalUnderstanding:
@@ -42,7 +42,7 @@ Schema:
 if __name__ == "__main__":
     import json
     
-    llm = GroqLLMClient()
+    llm = EndpointLLMClient()
     agent = LegalUnderstandingAgent(llm)
     result = agent.run("Doanh nghiệp SME có thể có bao nhiêu người làm việc?")
     data = result.model_dump() if hasattr(result, "model_dump") else result.dict()  

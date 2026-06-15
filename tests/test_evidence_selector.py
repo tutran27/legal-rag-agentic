@@ -1,5 +1,5 @@
 from src.agents.evidence_selector import EvidenceSelectorAgent
-from src.schema.agent_schemas import Evidence
+from src.schema.agent_schemas import Evidence, LegalUnderstanding
 
 
 class FakeLLM:
@@ -20,6 +20,29 @@ class FakeLLM:
                 },
             ],
             "rejected": [],
+        }
+
+
+class CombinedEvidenceLLM:
+    def __init__(self):
+        self.calls = 0
+
+    def call_llm_json(self, **kwargs):
+        self.calls += 1
+        return {
+            "selection": {
+                "selected": [
+                    {
+                        "unit_id": "u1",
+                        "role": "main",
+                        "reason": "Trả lời trực tiếp",
+                    }
+                ]
+            },
+            "sufficiency": {
+                "is_sufficient": True,
+                "reason": "Có căn cứ liên quan",
+            },
         }
 
 
@@ -74,3 +97,24 @@ def test_selector_keeps_clear_top_score():
     result = EvidenceSelectorAgent(FakeLLM()).run("Question", candidates)
 
     assert result.selected[0].unit_id == "top"
+
+
+def test_combined_evidence_assessment_uses_one_llm_call():
+    llm = CombinedEvidenceLLM()
+    candidates = [
+        Evidence(
+            unit_id="u1",
+            text="Điều kiện hỗ trợ doanh nghiệp nhỏ và vừa.",
+            final_score=1.0,
+        )
+    ]
+
+    result = EvidenceSelectorAgent(llm).run_with_sufficiency(
+        question="Điều kiện hỗ trợ là gì?",
+        understanding=LegalUnderstanding(),
+        candidates=candidates,
+    )
+
+    assert llm.calls == 1
+    assert result.selection.selected[0].unit_id == "u1"
+    assert result.sufficiency.is_sufficient is True

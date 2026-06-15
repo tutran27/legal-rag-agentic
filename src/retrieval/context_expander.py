@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import pyarrow.dataset as ds
 import re
+from qdrant_client import QdrantClient, models
 
+from src.retrieval.qdrant_payload import payload_to_evidence, scroll_payloads
 from src.schema.agent_schemas import Evidence
 
 
@@ -15,15 +17,30 @@ def expand_context(
     query: str = "",
     corpus_path: str = "data/processed/retrieval_corpus.parquet",
     top_k: int = 50,
+    client: QdrantClient | None = None,
 ) -> list[Evidence]:
     unit_ids = list({candidate.unit_id for candidate in candidates})
     if not unit_ids:
         return []
 
-    dataset = ds.dataset(corpus_path, format="parquet")
-    rows = dataset.to_table(
-        filter=ds.field("unit_id").isin(unit_ids)
-    ).to_pylist()
+    if client is not None:
+        rows = scroll_payloads(
+            client,
+            models.Filter(
+                must=[
+                    models.FieldCondition(
+                        key="unit_id",
+                        match=models.MatchAny(any=unit_ids),
+                    )
+                ]
+            ),
+            limit=max(100, len(unit_ids) * 20),
+        )
+    else:
+        dataset = ds.dataset(corpus_path, format="parquet")
+        rows = dataset.to_table(
+            filter=ds.field("unit_id").isin(unit_ids)
+        ).to_pylist()
     seed_chunks = {
         candidate.chunk_id for candidate in candidates if candidate.chunk_id
     }
@@ -60,15 +77,7 @@ def expand_context(
         overlap = len(query_tokens & row_tokens) / max(len(query_tokens), 1)
         score = 0.5 * float(seed_score) + overlap
         results.append(
-            Evidence(
-                unit_id=row["unit_id"],
-                chunk_id=row["chunk_id"],
-                text=row["text"],
-                source="context",
-                score=score,
-                final_score=score,
-                metadata=row,
-            )
+            payload_to_evidence(row, source="context", score=score)
         )
     results.sort(key=lambda item: item.final_score, reverse=True)
     return results[:top_k]

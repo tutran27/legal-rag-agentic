@@ -23,7 +23,7 @@ Legal Agent RAG xử lý câu hỏi theo ba lớp:
 | Sparse retrieval | BM25 + Qdrant IDF |
 | Token-level rerank | BGE-M3 ColBERT |
 | Cross-encoder | `Qwen/Qwen3-Reranker-0.6B` |
-| LLM agents | Groq, mặc định `llama-3.1-8b-instant` |
+| LLM agents | Modal HTTP endpoint, Qwen 2.5 14B Instruct |
 | Cloud embedding | Modal A100 80 GB |
 | Data format | Parquet, Pydantic, JSON |
 
@@ -50,8 +50,8 @@ flowchart TD
     G1 --> H
     G2 --> H
 
-    H --> I["ColBERT: 100 → 60"]
-    I --> J["Cross-encoder: 60 → 40"]
+    H --> I["ColBERT: 80 → 40"]
+    I --> J["Cross-encoder: 40 → 20"]
     J --> K["Final top 20"]
 
     K --> L["Evidence Selector"]
@@ -84,7 +84,6 @@ flowchart TD
 
 Giới hạn hiện tại:
 
-- `scripts/03_run_inference.py` đang dùng câu hỏi hard-code, chưa nhận `--query`.
 - Sufficiency chưa tự chạy lại toàn bộ retrieval với query mới.
 - Summary retrieval có implementation nhưng mặc định tắt.
 - Chưa có supervisor orchestration riêng và benchmark chính thức.
@@ -107,8 +106,9 @@ src/
 ├── chunking/     Tạo retrieval corpus
 ├── common/       Config, embedding và BM25
 ├── data/         Download và chuẩn hóa dữ liệu
-├── generation/   Groq LLM client
+├── generation/   HTTP endpoint LLM client
 ├── indexing/     Graph index và Qdrant collection
+├── pipeline/     Điều phối toàn bộ luồng inference
 ├── retrieval/    Retrieval, fusion, expansion và rerank
 ├── schema/       Pydantic schema
 └── submission/   Validate, ghi và nén kết quả
@@ -134,16 +134,30 @@ pip install -r requirements.txt
 Tạo `.env`:
 
 ```env
-GROQ_API_KEY=your-groq-api-key
 HF_TOKEN=your-huggingface-read-token
 
 QDRANT_URL=http://localhost:6333
 QDRANT_COLLECTION=legal_agent_rag_harrier_idf
+LLM_ENDPOINT_URL=https://your-modal-endpoint.modal.run
+LLM_ENDPOINT_TIMEOUT=600
 
 # Tùy chọn
 DENSE_MODEL=mainguyen9/vietlegal-harrier-0.6b
 COLBERT_MODEL=BAAI/bge-m3
 QDRANT_TIMEOUT=120
+QDRANT_HNSW_EF=64
+COLBERT_BATCH_SIZE=16
+CROSS_ENCODER_BATCH_SIZE=16
+RETRIEVAL_TOP_K=80
+INITIAL_FUSION_TOP_K=80
+COLBERT_TOP_K=40
+CROSS_ENCODER_TOP_K=20
+GRAPH_SEED_TOP_K=5
+GRAPH_TOP_K=10
+CONTEXT_TOP_K=10
+FINAL_TOP_K=20
+RERANK_MAX_CHARS=3000
+PRELOAD_GRAPH=true
 ```
 
 Không commit `.env`, token, embedding shards hoặc Qdrant storage.
@@ -324,6 +338,10 @@ Chạy sau khi collection đã tồn tại:
 python scripts/05_create_payload_indexes.py
 ```
 
+Lệnh tạo index cho `is_current`, `doc_code`, `doc_id`, `unit_id`, `article`,
+`doc_type`, `domain` và `sector`. Các index này bắt buộc để exact search,
+graph/context expansion và filtered hybrid search không quét toàn collection.
+
 Các index:
 
 | Field | Type |
@@ -365,20 +383,62 @@ Không chạy `docker compose down -v` nếu chưa chắc chắn về dữ liệ
 python scripts/03_run_inference.py
 ```
 
+Truyền câu hỏi và đường dẫn kết quả:
+
+```bash
+python scripts/03_run_inference.py \
+  --query "Điều kiện hỗ trợ doanh nghiệp nhỏ và vừa là gì?" \
+  --question-id 1 \
+  --output results.json
+```
+
+Chạy file nhiều câu với micro-batch:
+
+```bash
+python scripts/03_run_inference.py \
+  --input R2AIStage1DATA.json \
+  --output results.json \
+  --batch-size 4
+```
+
+Micro-batch gom dense embedding và Qdrant request của nhiều câu. ColBERT và
+cross-encoder vẫn chạy tuần tự trên một GPU để không nhân bản model hoặc tranh
+VRAM.
+
 Script sẽ:
 
 1. Load dense model, ColBERT và cross-encoder.
-2. Chạy understanding và query planning.
-3. Hybrid retrieval cho ba query.
+2. Gộp understanding và query planning trong một LLM call.
+3. Encode ba query theo batch và gửi một Qdrant batch request.
 4. Fusion, graph và context expansion.
-5. ColBERT `100 → 60`, cross-encoder `60 → 40`, lấy top `20`.
-6. Chọn tối đa `5` evidence.
-7. Sufficiency check, reasoning và verification.
+5. ColBERT `80 → 40`, cross-encoder `40 → 20`, batch mặc định `16`.
+6. Gộp evidence selection và sufficiency trong một LLM call.
+7. Reasoning và verification.
 8. Validate citation và ghi `results.json`.
 9. In latency của từng bước.
 
-Để thay câu hỏi, hiện cần sửa biến `query` trong `main()` của
-`scripts/03_run_inference.py`.
+Dense model và cross-encoder dùng FP16 khi CUDA khả dụng. Một lượt thành công
+thông thường cần `4` LLM call thay vì `6`.
+
+Kết quả benchmark trên RTX 3060 12 GB:
+
+- ColBERT batch `16` nhanh hơn `8`, `24` và `32`.
+- Cross-encoder batch `32` chỉ nhanh hơn batch `16` không đáng kể nhưng dùng
+  nhiều VRAM hơn, nên mặc định vẫn là `16`.
+- `QDRANT_HNSW_EF=64` nhanh hơn `96` trong phép đo xen kẽ.
+- Micro-batch 4 câu giảm thời gian dense + Qdrant khoảng `4,46x` so với gọi
+  tuần tự trong phép đo hiện tại.
+
+Luồng được đóng gói trong `src/pipeline/inference_pipeline.py`. Có thể giữ một
+instance `InferencePipeline` trong process và gọi `run(...)` nhiều lần để không
+phải tải lại model:
+
+```python
+from src.pipeline import InferencePipeline
+
+pipeline = InferencePipeline()
+result = pipeline.run("Điều kiện hỗ trợ doanh nghiệp nhỏ và vừa là gì?")
+```
 
 ## 📦 Validate và đóng gói
 

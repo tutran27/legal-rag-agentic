@@ -1,6 +1,7 @@
 from FlagEmbedding import BGEM3FlagModel
 from huggingface_hub import snapshot_download
 from sentence_transformers import SentenceTransformer
+import torch
 
 from src.common.config import settings
 
@@ -25,7 +26,17 @@ def load_dense_model(
 ) -> SentenceTransformer:
     token = hf_token or settings.hf_token
     model_path = download_model(model_name, token)
-    return SentenceTransformer(model_path, token=token)
+    model_kwargs = (
+        {"torch_dtype": torch.float16}
+        if torch.cuda.is_available()
+        else None
+    )
+    return SentenceTransformer(
+        model_path,
+        token=token,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        model_kwargs=model_kwargs,
+    )
 
 
 def load_colbert_model(

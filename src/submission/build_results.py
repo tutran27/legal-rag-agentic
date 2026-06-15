@@ -10,7 +10,8 @@ def write_results(
 ) -> Path:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+    temporary_path.write_text(
         json.dumps(
             [item.model_dump() for item in items],
             ensure_ascii=False,
@@ -18,4 +19,5 @@ def write_results(
         ),
         encoding="utf-8",
     )
+    temporary_path.replace(path)
     return path

@@ -3,18 +3,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from qdrant_client import QdrantClient, models
+from qdrant_client import QdrantClient
 
 from src.common.config import settings
-
-
-PAYLOAD_INDEXES = {
-    "is_current": models.PayloadSchemaType.BOOL,
-    "doc_code": models.PayloadSchemaType.KEYWORD,
-    "doc_type": models.PayloadSchemaType.KEYWORD,
-    "domain": models.PayloadSchemaType.KEYWORD,
-    "sector": models.PayloadSchemaType.KEYWORD,
-}
+from src.indexing.qdrant_collection import (
+    PAYLOAD_INDEXES,
+    create_payload_indexes,
+)
 
 
 def main() -> None:
@@ -26,18 +21,13 @@ def main() -> None:
     try:
         for field_name, field_schema in PAYLOAD_INDEXES.items():
             print(f"Creating payload index: {field_name} ({field_schema.value})")
-            client.create_payload_index(
-                collection_name=settings.collection_name,
-                field_name=field_name,
-                field_schema=field_schema,
-                wait=True,
-                timeout=600,
-            )
+        create_payload_indexes(client, settings.collection_name)
 
         schema = client.get_collection(
             settings.collection_name
         ).payload_schema
         print("Payload indexes:", ", ".join(sorted(schema)))
+
     finally:
         client.close()
 

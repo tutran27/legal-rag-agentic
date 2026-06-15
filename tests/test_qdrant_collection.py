@@ -3,7 +3,12 @@ from types import SimpleNamespace
 import pytest
 from qdrant_client import models
 
-from src.indexing.qdrant_collection import create_collection, validate_collection
+from src.indexing.qdrant_collection import (
+    PAYLOAD_INDEXES,
+    create_collection,
+    create_payload_indexes,
+    validate_collection,
+)
 
 
 class FakeClient:
@@ -13,6 +18,7 @@ class FakeClient:
         self.exists = exists
         self.dense_dim = dense_dim
         self.modifier = modifier
+        self.payload_indexes = []
 
     def collection_exists(self, collection_name):
         return self.exists
@@ -42,6 +48,9 @@ class FakeClient:
             )
         )
 
+    def create_payload_index(self, **kwargs):
+        self.payload_indexes.append(kwargs)
+
 
 def test_collection_uses_sparse_idf():
     client = FakeClient()
@@ -70,3 +79,15 @@ def test_existing_collection_must_match_dense_dimension():
 
     with pytest.raises(RuntimeError, match="1024 chiều"):
         validate_collection(client, "legal-old", dense_dim=1024)
+
+
+def test_create_all_required_payload_indexes():
+    client = FakeClient()
+
+    create_payload_indexes(client, "legal-idf")
+
+    fields = {
+        item["field_name"]: item["field_schema"]
+        for item in client.payload_indexes
+    }
+    assert fields == PAYLOAD_INDEXES

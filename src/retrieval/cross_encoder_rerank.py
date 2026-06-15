@@ -1,5 +1,8 @@
 from sentence_transformers import CrossEncoder
 import numpy as np
+import torch
+
+from src.common.config import settings
 
 model_name="Qwen/Qwen3-Reranker-0.6B"
 
@@ -19,7 +22,7 @@ def cross_encoder_rerank(
     model: CrossEncoder = None,
     model_name: str = model_name,
     top_k: int = 30,
-    batch_size: int = 8,
+    batch_size: int = settings.cross_encoder_batch_size,
 ):
     if not candidates:
         return []
@@ -27,12 +30,20 @@ def cross_encoder_rerank(
     if model is None:
         model = CrossEncoder(model_name)
 
-    scores = np.asarray(
-        model.predict(
-            [(query, candidate.text) for candidate in candidates],
-            batch_size=batch_size,
+    pairs = [
+        (
+            query,
+            (
+                f"{candidate.metadata.get('article_title') or ''}\n"
+                f"{candidate.metadata.get('content_text') or candidate.text}"
+            )[:settings.rerank_max_chars],
         )
-    ).reshape(-1)
+        for candidate in candidates
+    ]
+    with torch.inference_mode():
+        scores = np.asarray(
+            model.predict(pairs, batch_size=batch_size)
+        ).reshape(-1)
     raw_scores = [float(score) for score in scores]
     ce_scores = _minmax(raw_scores)
     colbert_scores = [

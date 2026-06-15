@@ -1,6 +1,33 @@
 from qdrant_client import QdrantClient, models
 
 
+PAYLOAD_INDEXES = {
+    "is_current": models.PayloadSchemaType.BOOL,
+    "doc_code": models.PayloadSchemaType.KEYWORD,
+    "doc_id": models.PayloadSchemaType.KEYWORD,
+    "unit_id": models.PayloadSchemaType.KEYWORD,
+    "article": models.PayloadSchemaType.KEYWORD,
+    "doc_type": models.PayloadSchemaType.KEYWORD,
+    "domain": models.PayloadSchemaType.KEYWORD,
+    "sector": models.PayloadSchemaType.KEYWORD,
+}
+
+
+def create_payload_indexes(
+    client: QdrantClient,
+    collection_name: str,
+    wait: bool = True,
+) -> None:
+    for field_name, field_schema in PAYLOAD_INDEXES.items():
+        client.create_payload_index(
+            collection_name=collection_name,
+            field_name=field_name,
+            field_schema=field_schema,
+            wait=wait,
+            timeout=600,
+        )
+
+
 def validate_collection(
     client: QdrantClient,
     collection_name: str,
