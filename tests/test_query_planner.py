@@ -1,36 +1,40 @@
-from src.agents.query_planner import QueryPlannerAgent
+from src.agents.query_planner import QueryPlannerAgent, _tokens
 from src.schema.agent_schemas import LegalUnderstanding
 
 
-class FakeLLM:
+class DuplicateQueryLLM:
     def call_llm_json(self, **kwargs):
         return {
             "queries": [
                 {
                     "query_type": "legal_rewrite",
-                    "text": "chính sách hỗ trợ cơ sở ươm tạo về thuế đất",
-                }
+                    "text": "Điều kiện hỗ trợ doanh nghiệp nhỏ và vừa?",
+                },
+                {
+                    "query_type": "keyword",
+                    "text": "điều kiện hỗ trợ doanh nghiệp nhỏ và vừa",
+                },
             ],
-            "filters": {
-                "domains": ["doanh nghiệp"],
-                "is_current": True,
-            },
-            "retrieval": {
-                "use_bm25": False,
-                "top_k_dense": 50,
-                "top_k_sparse": 50,
-                "top_k_colbert": 20,
-            },
+            "filters": {"is_current": True},
         }
 
 
-def test_query_planner_adds_original_query():
-    planner = QueryPlannerAgent(FakeLLM())
-    plan = planner.run(
-        "Cơ sở ươm tạo được hỗ trợ gì về thuế và đất đai?",
-        LegalUnderstanding(domain="doanh nghiệp"),
+def test_query_planner_replaces_repetitive_queries():
+    question = "Doanh nghiệp nhỏ và vừa cần điều kiện nào để được hỗ trợ?"
+    plan = QueryPlannerAgent(DuplicateQueryLLM()).run(
+        question,
+        LegalUnderstanding(
+            domain="doanh nghiệp nhỏ và vừa",
+            intent="condition_question",
+        ),
     )
 
-    assert plan.queries[0].query_type == "original"
-    assert plan.filters.is_current is True
-    assert plan.retrieval.use_colbert is True
+    assert [query.query_type for query in plan.queries] == [
+        "original",
+        "legal_rewrite",
+        "keyword",
+    ]
+    assert "?" not in plan.queries[1].text
+    assert len(_tokens(plan.queries[1].text) - _tokens(question)) >= 1
+    assert len(_tokens(plan.queries[2].text) - _tokens(question)) >= 1
+    assert plan.queries[1].text != plan.queries[2].text

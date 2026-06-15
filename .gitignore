@@ -44,6 +44,8 @@ venv.bak/
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 
 # Data (large datasets)
 data/raw/
@@ -51,6 +53,7 @@ data/processed/
 data/indexes/
 data/cache/
 data/embedding_shards/
+data/embedding_shards_harrier/
 data/qdrant_storage/
 data/*.parquet
 data/*.csv
@@ -112,3 +115,4 @@ temp/
 # Local vector stores / services
 qdrant_storage/
 storage/
+.modal/

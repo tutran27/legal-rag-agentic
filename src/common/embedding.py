@@ -5,6 +5,12 @@ from sentence_transformers import SentenceTransformer
 from src.common.config import settings
 
 
+HARRIER_QUERY_INSTRUCTION = (
+    "Instruct: Given a Vietnamese legal question, retrieve relevant legal "
+    "passages that answer the question\nQuery: "
+)
+
+
 def download_model(model_name: str, hf_token: str | None = None) -> str:
     return snapshot_download(
         repo_id=model_name,
@@ -34,7 +40,13 @@ def embed_dense(
     texts: list[str],
     model: SentenceTransformer,
     batch_size: int = settings.batch_size,
+    is_query: bool = False,
 ):
+    if is_query:
+        texts = [
+            f"{HARRIER_QUERY_INSTRUCTION}{text}"
+            for text in texts
+        ]
     return model.encode(
         texts,
         normalize_embeddings=settings.normalize_dense,

@@ -44,16 +44,26 @@ def export_embeddings():
     from sentence_transformers import SentenceTransformer
 
     parquet = pq.ParquetFile(CORPUS)
-    checkpoint = {"row_group": 0, "batch_size": BATCH_SIZES[0]}
+    model_name = os.getenv(
+        "DENSE_MODEL",
+        "mainguyen9/vietlegal-harrier-0.6b",
+    )
+    checkpoint = {
+        "row_group": 0,
+        "batch_size": BATCH_SIZES[0],
+        "model": model_name,
+    }
     if CHECKPOINT.exists():
-        checkpoint.update(json.loads(CHECKPOINT.read_text()))
+        saved_checkpoint = json.loads(CHECKPOINT.read_text())
+        if saved_checkpoint.get("model") != model_name:
+            raise RuntimeError(
+                "Checkpoint thuộc dense model khác. Chạy lại với --recreate."
+            )
+        checkpoint.update(saved_checkpoint)
     checkpoint["batch_size"] = BATCH_SIZES[0]
 
     model = SentenceTransformer(
-        os.getenv(
-            "DENSE_MODEL",
-            "tutran27/vietnamese-legal-phapdien-embedding-v1",
-        ),
+        model_name,
         token=os.getenv("HF_TOKEN"),
         device="cuda",
         model_kwargs={"torch_dtype": torch.float16},

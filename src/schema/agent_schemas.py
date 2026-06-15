@@ -52,14 +52,15 @@ class RetrievalPlan(BaseModel):
     use_colbert: bool = True
     use_cross_encoder: bool = True
     use_graph: bool = True
+    use_context: bool = True
     use_summary: bool = False
 
     top_k_exact: int = 50
     top_k_bm25: int = 100
     top_k_dense: int = 100
     top_k_sparse: int = 100
-    top_k_colbert: int = 50
-    top_k_cross_encoder: int = 30
+    top_k_colbert: int = 60
+    top_k_cross_encoder: int = 40
     top_k_graph: int = 50
     top_k_summary: int = 30
 
@@ -87,6 +88,10 @@ class Evidence(BaseModel):
     score: float = 0.0
     final_score: float = 0.0
     rerank_score: float | None = None
+    colbert_rerank_score: float | None = None
+    colbert_normalized_score: float | None = None
+    cross_encoder_rerank_score: float | None = None
+    cross_encoder_normalized_score: float | None = None
     vote_count: int = 0
 
     metadata: dict[str, Any] = Field(default_factory=dict)

@@ -1,6 +1,6 @@
 import numpy as np
 
-from src.indexing.build_colbert import colbert_score
+from src.retrieval.bm25_retriever import colbert_score
 
 
 def test_colbert_score_prefers_matching_document():

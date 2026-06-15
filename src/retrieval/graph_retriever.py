@@ -9,6 +9,25 @@ import pyarrow.dataset as ds
 from src.schema.agent_schemas import Evidence
 
 
+RELATION_WEIGHTS = {
+    "AMENDS": 1.0,
+    "GUIDES": 0.9,
+    "REFERENCES": 0.6,
+    "RELATED": 0.25,
+}
+STOPWORDS = {
+    "các", "có", "của", "được", "là", "những", "theo", "trong", "và", "về",
+}
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"\w+", text.lower())
+        if len(token) > 1 and token not in STOPWORDS
+    }
+
+
 def graph_search(
     query: str,
     candidates: list[Evidence],
@@ -16,6 +35,7 @@ def graph_search(
     corpus_path: str = "data/processed/retrieval_corpus.parquet",
     top_k: int = 50,
     current_only: bool = True,
+    max_related_docs: int = 30,
 ) -> list[Evidence]:
     if not candidates:
         return []
@@ -24,6 +44,22 @@ def graph_search(
         graph = pickle.load(file)
 
     related_docs = {}
+    seed_doc_ids = {
+        str(candidate.metadata.get("doc_id") or "")
+        for candidate in candidates
+    }
+
+    def add_related(doc_id: str, relation: str, seed_doc_id: str, score: float):
+        if not doc_id or doc_id in seed_doc_ids:
+            return
+        current = related_docs.get(doc_id)
+        if current is None or score > current["score"]:
+            related_docs[doc_id] = {
+                "score": score,
+                "relation": relation,
+                "seed_doc_id": seed_doc_id,
+            }
+
     for candidate in candidates:
         doc_id = str(candidate.metadata.get("doc_id") or "")
         if not doc_id or doc_id not in graph:
@@ -32,22 +68,33 @@ def graph_search(
         base_score = candidate.final_score or candidate.score or 1.0
 
         for _, target, data in graph.out_edges(doc_id, data=True):
-            related_docs[str(target)] = {
-                "score": base_score,
-                "relation": data.get("relation_type", "RELATED"),
-                "seed_doc_id": doc_id,
-            }
+            relation = str(data.get("relation_type", "RELATED")).upper()
+            add_related(
+                str(target),
+                relation,
+                doc_id,
+                base_score + RELATION_WEIGHTS.get(relation, 0.2),
+            )
 
         for source, _, data in graph.in_edges(doc_id, data=True):
-            related_docs[str(source)] = {
-                "score": base_score,
-                "relation": data.get("relation_type", "RELATED"),
-                "seed_doc_id": doc_id,
-            }
+            relation = str(data.get("relation_type", "RELATED")).upper()
+            add_related(
+                str(source),
+                relation,
+                doc_id,
+                base_score + RELATION_WEIGHTS.get(relation, 0.2),
+            )
 
     if not related_docs:
         return []
 
+    related_docs = dict(
+        sorted(
+            related_docs.items(),
+            key=lambda item: item[1]["score"],
+            reverse=True,
+        )[:max_related_docs]
+    )
     dataset = ds.dataset(corpus_path, format="parquet")
     condition = ds.field("doc_id").isin(list(related_docs))
     if current_only:
@@ -57,16 +104,20 @@ def graph_search(
     if not rows:
         return []
 
-    query_tokens = set(re.findall(r"\w+", query.lower()))
-    scores = [
-        len(query_tokens & set(re.findall(r"\w+", row["text"].lower())))
-        for row in rows
-    ]
+    query_tokens = _tokens(query)
 
     results = []
-    for row, text_score in zip(rows, scores):
+    for row in rows:
         graph_info = related_docs[row["doc_id"]]
-        score = float(text_score) + graph_info["score"]
+        text = " ".join(
+            [
+                str(row.get("article_title") or ""),
+                str(row.get("content_text") or row.get("text") or ""),
+            ]
+        )
+        text_tokens = _tokens(text)
+        overlap = len(query_tokens & text_tokens) / max(len(query_tokens), 1)
+        score = graph_info["score"] + overlap
         results.append(
             Evidence(
                 unit_id=row["unit_id"],
@@ -81,11 +132,9 @@ def graph_search(
                 score=score,
                 final_score=score,
                 metadata={
-                    "doc_id": row["doc_id"],
+                    **row,
                     "relation_type": graph_info["relation"],
                     "seed_doc_id": graph_info["seed_doc_id"],
-                    "status": row["status"],
-                    "is_current": row["is_current"],
                 },
             )
         )

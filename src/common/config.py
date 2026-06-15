@@ -18,7 +18,9 @@ def _get_bool(name: str, default: bool) -> bool:
 
 class Settings:
     qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
-    collection_name = os.getenv("QDRANT_COLLECTION", "legal_agent_rag")
+    collection_name = os.getenv(
+        "QDRANT_COLLECTION", "legal_agent_rag_harrier_idf"
+    )
 
     top_n = _get_int("TOP_N", 50)
     top_k = _get_int("TOP_K", 10)
@@ -26,7 +28,7 @@ class Settings:
     normalize_dense = _get_bool("NORMALIZE_DENSE", True)
 
     dense_model = os.getenv(
-        "DENSE_MODEL", "tutran27/vietnamese-legal-phapdien-embedding-v1"
+        "DENSE_MODEL", "mainguyen9/vietlegal-harrier-0.6b"
     )
     colbert_model = os.getenv(
         "COLBERT_MODEL",
@@ -39,6 +41,7 @@ class Settings:
 
     qdrant_upsert_batch_size = _get_int("QDRANT_UPSERT_BATCH_SIZE", 64)
     qdrant_upload_workers = _get_int("QDRANT_UPLOAD_WORKERS", 4)
+    qdrant_timeout = _get_int("QDRANT_TIMEOUT", 120)
     store_text = _get_bool("STORE_TEXT", True)
 
 

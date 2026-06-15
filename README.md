@@ -319,7 +319,7 @@ Nếu ingest local bị dừng, chạy lại cùng lệnh để resume.
 ### 7. Kiểm tra collection
 
 ```bash
-curl http://localhost:6333/collections/legal_agent_rag
+curl http://localhost:6333/collections/legal_agent_rag_harrier_idf
 ```
 
 Kiểm tra `points_count` đạt khoảng `1.008.658`, collection có named vector
@@ -328,6 +328,45 @@ Kiểm tra `points_count` đạt khoảng `1.008.658`, collection có named vect
 Sau khi xác nhận search hoạt động, có thể xóa `data/embedding_shards` để giải
 phóng dung lượng. Nên giữ shards nếu muốn rebuild Qdrant mà không chạy Modal
 lần nữa.
+
+### Qdrant báo mất collection sau khi WSL restart
+
+Khi Qdrant dùng bind mount từ `/mnt/d`, Docker đôi lúc vẫn báo mount đúng nhưng
+`/qdrant/storage` bên trong container lại trở thành `tmpfs` rỗng. Collection lúc
+đó không xuất hiện, dù dữ liệu cũ vẫn còn trong:
+
+```text
+D:\legal-agent-rag\data\qdrant_storage
+```
+
+Kiểm tra:
+
+```bash
+docker exec legal-agent-qdrant df -T /qdrant/storage
+docker exec legal-agent-qdrant du -sh /qdrant/storage
+du -sh data/qdrant_storage
+curl http://localhost:6333/collections
+```
+
+Nếu container hiển thị `tmpfs` và chỉ có vài KB, trong khi thư mục host vẫn
+khoảng `7.9G`, hãy tạo lại container:
+
+```bash
+docker compose down
+docker compose up -d --force-recreate
+```
+
+Sau đó kiểm tra lại:
+
+```bash
+docker exec legal-agent-qdrant du -sh /qdrant/storage
+curl http://localhost:6333/collections
+```
+
+Không chạy `docker compose down -v`, vì tùy cấu hình lệnh này có thể xóa volume.
+Nếu lỗi lặp lại, nên chuyển Qdrant storage sang Docker named volume hoặc
+filesystem ext4 của WSL. Bind mount từ ổ Windows qua `/mnt/d` không ổn định cho
+database sử dụng mmap như Qdrant.
 
 ## Test
 

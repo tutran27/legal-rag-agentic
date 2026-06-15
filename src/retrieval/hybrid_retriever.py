@@ -19,32 +19,67 @@ def hybrid_search(
     top_n: int = 100,
     top_colbert: int = 50,
     top_k: int = 30,
+    rerank: bool = True,
+    use_dense: bool = True,
+    use_sparse: bool = True,
 ):
-    dense = embed_dense([query], dense_st)
+    if not use_dense and not use_sparse:
+        return []
 
-    client = QdrantClient(url=qdrant_url, prefer_grpc=True)
+    dense = (
+        embed_dense([query], dense_st, is_query=True)
+        if use_dense
+        else None
+    )
+
+    client = QdrantClient(
+        url=qdrant_url,
+        prefer_grpc=True,
+        timeout=settings.qdrant_timeout,
+    )
     try:
-        points = client.query_points(
-            collection_name=collection_name,
-            prefetch=[
+        prefetch = []
+        if use_dense:
+            prefetch.append(
                 models.Prefetch(
                     query=dense[0],
                     limit=top_n,
                     using="dense",
                     filter=flt,
-                ),
+                )
+            )
+        if use_sparse:
+            prefetch.append(
                 models.Prefetch(
                     query=bm25_vector(query),
                     limit=top_n,
                     using="sparse",
                     filter=flt,
-                ),
-            ],
-            query=models.FusionQuery(fusion=models.Fusion.RRF),
-            limit=top_n,
-            with_payload=True,
-            with_vectors=False,
-        ).points
+                )
+            )
+
+        if len(prefetch) == 1:
+            request = prefetch[0]
+            points = client.query_points(
+                collection_name=collection_name,
+                query=request.query,
+                using=request.using,
+                query_filter=request.filter,
+                limit=top_n,
+                with_payload=True,
+                with_vectors=False,
+                timeout=settings.qdrant_timeout,
+            ).points
+        else:
+            points = client.query_points(
+                collection_name=collection_name,
+                prefetch=prefetch,
+                query=models.FusionQuery(fusion=models.Fusion.RRF),
+                limit=top_n,
+                with_payload=True,
+                with_vectors=False,
+                timeout=settings.qdrant_timeout,
+            ).points
     finally:
         client.close()
 
@@ -53,11 +88,15 @@ def hybrid_search(
             unit_id=point.payload["unit_id"],
             chunk_id=point.payload.get("chunk_id"),
             text=point.payload["text"],
+            source="hybrid",
             score=point.score,
             metadata=point.payload,
         )
         for point in points
     ]
+    if not rerank:
+        return candidates
+
     candidates = colbert_rerank(
         query, candidates, colbert_model, top_k=top_colbert
     )
@@ -81,7 +120,4 @@ if __name__ == "__main__":
         colbert_model,
         None,
     )
-    for x in candidates[:4]:
-        print("-------------------------------")
-        for k, v in x.metadata.items():
-            print(f"{k.upper()}: {v}")
+    print(type(candidates[0]))

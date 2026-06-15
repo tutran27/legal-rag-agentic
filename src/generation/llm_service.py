@@ -60,11 +60,21 @@ class GroqLLMClient:
             return json.loads(text)
         except json.JSONDecodeError:
             pass
+
+        try:
+            return json.loads(text, strict=False)
+        except json.JSONDecodeError:
+            pass
+
         match = re.search(r"\{.*\}", text, flags=re.DOTALL)
         if not match:
             raise ValueError(f"Cannot find JSON object in LLM output:\n{text}")
 
-        return json.loads(match.group(0))
+        json_text = match.group(0)
+        try:
+            return json.loads(json_text)
+        except json.JSONDecodeError:
+            return json.loads(json_text, strict=False)
 
     def call_llm_json(
         self,

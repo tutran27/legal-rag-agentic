@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import uuid
 from pathlib import Path
@@ -10,29 +11,50 @@ from tqdm import tqdm
 
 from src.common.bm25 import average_length, bm25_vector
 from src.common.config import settings
-from src.indexing.build_hybrid_ingest import ensure_collection
+from src.indexing.qdrant_collection import create_collection
 
-SHARDS = Path("data/embedding_shards")
-CHECKPOINT = SHARDS / "qdrant_checkpoint.json"
+DEFAULT_SHARDS = Path("data/embedding_shards")
 
 
-def main(recreate: bool = False) -> None:
-    files = sorted(SHARDS.glob("part-*.parquet"))
+def main(
+    recreate: bool = False,
+    shards_dir: str | Path = DEFAULT_SHARDS,
+    build_hnsw: bool = False,
+) -> None:
+    shards = Path(shards_dir)
+    checkpoint_path = shards / "qdrant_checkpoint.json"
+    files = sorted(shards.glob("part-*.parquet"))
     if not files:
-        raise FileNotFoundError(f"Không tìm thấy shard trong {SHARDS}")
+        raise FileNotFoundError(f"Không tìm thấy shard trong {shards}")
 
     client = QdrantClient(url=settings.qdrant_url, prefer_grpc=True)
-    checkpoint = {"shard": 0}
-    if CHECKPOINT.exists() and not recreate:
-        checkpoint.update(json.loads(CHECKPOINT.read_text()))
+    collection_existed = client.collection_exists(settings.collection_name)
+    checkpoint = {
+        "shard": 0,
+        "collection": settings.collection_name,
+    }
+    if recreate:
+        checkpoint_path.unlink(missing_ok=True)
+    if checkpoint_path.exists() and not recreate and collection_existed:
+        saved_checkpoint = json.loads(checkpoint_path.read_text())
+        if saved_checkpoint.get("collection") == settings.collection_name:
+            checkpoint.update(saved_checkpoint)
 
     first = pq.read_table(files[0], columns=["dense"])
     dense_dim = len(first.column("dense")[0].as_py())
-    ensure_collection(
+    create_collection(
         client,
         settings.collection_name,
         dense_dim=dense_dim,
         recreate=recreate,
+    )
+    client.update_collection(
+        collection_name=settings.collection_name,
+        hnsw_config=models.HnswConfigDiff(m=0),
+        optimizer_config=models.OptimizersConfigDiff(
+            indexing_threshold=0,
+            max_optimization_threads=1,
+        ),
     )
 
     avg_length = average_length(
@@ -48,39 +70,58 @@ def main(recreate: bool = False) -> None:
         tqdm(files[checkpoint["shard"] :], desc="Ingest shards"),
         start=checkpoint["shard"],
     ):
-        rows = pq.read_table(file).to_pylist()
-        points = [
-            models.PointStruct(
-                id=str(
-                    uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        f"legal-rag:{row['chunk_id']}",
-                    )
-                ),
-                vector={
-                    "dense": row.pop("dense"),
-                    "sparse": bm25_vector(row["text"], avg_length),
-                },
-                payload=row,
+        parquet = pq.ParquetFile(file)
+        for batch in parquet.iter_batches(batch_size=256):
+            rows = batch.to_pylist()
+            points = [
+                models.PointStruct(
+                    id=str(
+                        uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            f"legal-rag:{row['chunk_id']}",
+                        )
+                    ),
+                    vector={
+                        "dense": row.pop("dense"),
+                        "sparse": bm25_vector(row["text"], avg_length),
+                    },
+                    payload=row,
+                )
+                for row in rows
+            ]
+            client.upload_points(
+                collection_name=settings.collection_name,
+                points=points,
+                batch_size=64,
+                parallel=1,
+                wait=True,
             )
-            for row in rows
-        ]
-        client.upload_points(
-            collection_name=settings.collection_name,
-            points=points,
-            batch_size=128,
-            parallel=4,
-            wait=False,
-        )
         checkpoint["shard"] = shard_index + 1
-        CHECKPOINT.write_text(json.dumps(checkpoint))
+        checkpoint_path.write_text(json.dumps(checkpoint))
 
-    client.update_collection(
-        collection_name=settings.collection_name,
-        hnsw_config=models.HnswConfigDiff(m=16, on_disk=True),
-    )
+    if build_hnsw:
+        client.update_collection(
+            collection_name=settings.collection_name,
+            hnsw_config=models.HnswConfigDiff(m=16, on_disk=True),
+            optimizer_config=models.OptimizersConfigDiff(
+                indexing_threshold=20_000,
+                max_optimization_threads=1,
+            ),
+        )
     client.close()
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--recreate", action="store_true")
+    parser.add_argument(
+        "--shards-dir",
+        default=str(DEFAULT_SHARDS),
+    )
+    parser.add_argument("--build-hnsw", action="store_true")
+    args = parser.parse_args()
+    main(
+        recreate=args.recreate,
+        shards_dir=args.shards_dir,
+        build_hnsw=args.build_hnsw,
+    )
