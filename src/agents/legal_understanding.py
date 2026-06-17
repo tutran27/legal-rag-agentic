@@ -2,6 +2,9 @@ from src.schema.agent_schemas import LegalUnderstanding
 from src.generation.endpoint import EndpointLLMClient
 
 
+LEGAL_UNDERSTANDING_MAX_TOKENS = 350
+
+
 class LegalUnderstandingAgent:
     def __init__(self, llm: EndpointLLMClient):
         self.llm = llm
@@ -32,7 +35,7 @@ Schema:
         data = self.llm.call_llm_json(
             query=question,
             system_prompt=system_prompt,
-            max_new_tokens=1024,
+            max_new_tokens=LEGAL_UNDERSTANDING_MAX_TOKENS,
             temperature=0.1,
             enable_thinking=False,
         )

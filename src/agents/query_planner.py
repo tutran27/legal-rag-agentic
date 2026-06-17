@@ -30,6 +30,7 @@ LEGAL_CONTEXTS = {
         "quyền lợi và điều kiện được hưởng"
     ),
 }
+QUERY_PLAN_MAX_TOKENS = 350
 
 
 def _tokens(text: str) -> set[str]:
@@ -119,7 +120,7 @@ Chỉ trả JSON theo schema:
                 ensure_ascii=False,
             ),
             system_prompt=prompt,
-            max_new_tokens=1536,
+            max_new_tokens=QUERY_PLAN_MAX_TOKENS,
             temperature=0.1,
         )
 
@@ -196,7 +197,7 @@ Chỉ trả JSON:
         data = self.llm.call_llm_json(
             query=question,
             system_prompt=prompt,
-            max_new_tokens=2048,
+            max_new_tokens=QUERY_PLAN_MAX_TOKENS,
             temperature=0.1,
         )
         result = PlanningResult(**data)

@@ -43,7 +43,7 @@ class Settings:
     qdrant_upload_workers = _get_int("QDRANT_UPLOAD_WORKERS", 4)
     qdrant_timeout = _get_int("QDRANT_TIMEOUT", 120)
     qdrant_hnsw_ef = _get_int("QDRANT_HNSW_EF", 64)
-    colbert_batch_size = _get_int("COLBERT_BATCH_SIZE", 16)
+    colbert_batch_size = _get_int("COLBERT_BATCH_SIZE", 8)
     cross_encoder_batch_size = _get_int("CROSS_ENCODER_BATCH_SIZE", 16)
     retrieval_top_k = _get_int("RETRIEVAL_TOP_K", 80)
     initial_fusion_top_k = _get_int("INITIAL_FUSION_TOP_K", 80)

@@ -10,6 +10,9 @@ from src.schema.agent_schemas import (
 )
 
 
+REASONER_MAX_TOKENS = 400
+
+
 class ReasonerAgent:
     def __init__(self, llm: Any):
         self.llm = llm
@@ -108,7 +111,7 @@ Chỉ trả về JSON:
                 ensure_ascii=False,
             ),
             system_prompt=prompt,
-            max_new_tokens=1536,
+            max_new_tokens=REASONER_MAX_TOKENS,
             temperature=0.1,
         )
 

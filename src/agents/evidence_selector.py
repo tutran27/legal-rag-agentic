@@ -11,6 +11,9 @@ from src.schema.agent_schemas import (
 )
 
 
+EVIDENCE_SELECTION_MAX_TOKENS = 650
+
+
 class EvidenceSelectorAgent:
     def __init__(self, llm: Any):
         self.llm = llm
@@ -85,7 +88,7 @@ Chỉ trả về JSON:
                 ensure_ascii=False,
             ),
             system_prompt=prompt,
-            max_new_tokens=2048,
+            max_new_tokens=EVIDENCE_SELECTION_MAX_TOKENS,
             temperature=0.0,
         )
 
@@ -177,7 +180,7 @@ Chỉ trả JSON:
                 ensure_ascii=False,
             ),
             system_prompt=prompt,
-            max_new_tokens=1536,
+            max_new_tokens=EVIDENCE_SELECTION_MAX_TOKENS,
             temperature=0.0,
         )
         assessment = EvidenceAssessment(**data)

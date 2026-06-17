@@ -17,7 +17,7 @@ from src.common.embedding import (
     load_colbert_model,
     load_dense_model,
 )
-from src.generation.endpoint import EndpointLLMClient
+from src.generation.endpoint import create_llm_client
 from src.retrieval.colbert_reranker import colbert_rerank
 from src.retrieval.context_expander import expand_context
 from src.retrieval.cross_encoder_rerank import cross_encoder_rerank
@@ -90,7 +90,7 @@ class InferencePipeline:
     ) -> None:
         self.verbose = verbose
         started = time.perf_counter()
-        self.llm = llm or EndpointLLMClient()
+        self.llm = llm or create_llm_client()
         self.dense_model = dense_model or load_dense_model()
         self.colbert_model = colbert_model or load_colbert_model()
         self.cross_encoder = cross_encoder or self._load_cross_encoder()

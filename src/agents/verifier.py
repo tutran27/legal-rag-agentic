@@ -8,6 +8,9 @@ from src.schema.agent_schemas import (
 )
 
 
+VERIFIER_MAX_TOKENS = 200
+
+
 class VerificationAgent:
     def __init__(self, llm: Any):
         self.llm = llm
@@ -78,7 +81,7 @@ Chỉ trả về JSON:
                 ensure_ascii=False,
             ),
             system_prompt=prompt,
-            max_new_tokens=1536,
+            max_new_tokens=VERIFIER_MAX_TOKENS,
             temperature=0.0,
         )
 

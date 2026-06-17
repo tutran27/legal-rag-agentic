@@ -59,3 +59,24 @@ def test_extract_json_accepts_raw_newline_inside_answer():
     result = EndpointLLMClient.extract_json_object(output)
 
     assert result["answer"] == "Dòng thứ nhất.\nDòng thứ hai."
+
+
+def test_call_llm_json_retries_invalid_json_response():
+    first = Mock()
+    first.json.return_value = {"response": '{"answer": "thiếu đóng json"'}
+    second = Mock()
+    second.json.return_value = {"response": '{"answer": "Nội dung hợp lệ"}'}
+    session = Mock()
+    session.post.side_effect = [first, second]
+    client = EndpointLLMClient(
+        endpoint_url="https://example.test",
+        session=session,
+    )
+
+    result = client.call_llm_json("Câu hỏi", max_new_tokens=200)
+
+    assert result == {"answer": "Nội dung hợp lệ"}
+    assert session.post.call_count == 2
+    retry_payload = session.post.call_args_list[1].kwargs["json"]
+    assert "invalid_output" in retry_payload["query"]
+    assert "JSON object hợp lệ" in retry_payload["prompt"]

@@ -9,6 +9,9 @@ from src.schema.agent_schemas import (
 )
 
 
+SUFFICIENCY_MAX_TOKENS = 650
+
+
 class SufficiencyCheckerAgent:
     def __init__(self, llm: Any):
         self.llm = llm
@@ -85,7 +88,7 @@ Chỉ trả về JSON:
                 ensure_ascii=False,
             ),
             system_prompt=prompt,
-            max_new_tokens=1536,
+            max_new_tokens=SUFFICIENCY_MAX_TOKENS,
             temperature=0.0,
         )
 
