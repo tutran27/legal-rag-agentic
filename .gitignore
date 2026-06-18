@@ -52,17 +52,24 @@ data/raw/
 data/processed/
 data/indexes/
 data/cache/
-data/embedding_shards/
-data/embedding_shards_harrier/
+data/embedding_shards*/
 data/qdrant_storage/
+data/qdrant_snapshots/
 data/*.parquet
 data/*.csv
 data/*.json
 data/*.jsonl
+data/**/*.parquet
+data/**/*.csv
+data/**/*.json
+data/**/*.jsonl
 
 # Generated submission artifacts
 results.json
 results.zip
+inference_errors.json
+*_errors.json
+*.checkpoint.json
 submissions/
 
 # Models
@@ -72,7 +79,10 @@ checkpoints/
 *.pt
 *.pth
 *.bin
+*.gguf
+*.onnx
 *.safetensors
+*.snapshot
 
 # Logs
 logs/

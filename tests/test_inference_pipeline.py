@@ -53,7 +53,7 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
         def __init__(self, llm):
             pass
 
-        def run_combined(self, question):
+        def run(self, question):
             return planning
 
     class FakeSelector:
@@ -63,7 +63,7 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
         def get_selected_evidence(self, candidates):
             return candidates
 
-        def run_with_sufficiency(self, **kwargs):
+        def run(self, **kwargs):
             return assessment
 
     class FakeReasoner:
@@ -182,7 +182,7 @@ def test_run_many_keeps_order_and_returns_item_error(monkeypatch):
         def __init__(self, llm):
             pass
 
-        def run_combined(self, question):
+        def run(self, question):
             if question == "bad":
                 raise ValueError("planning failed")
             return planning

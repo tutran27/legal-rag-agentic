@@ -18,6 +18,7 @@ def _get_bool(name: str, default: bool) -> bool:
 
 class Settings:
     qdrant_url = os.getenv("QDRANT_URL", "http://localhost:6333")
+    qdrant_api_key = os.getenv("QDRANT_API_KEY")
     collection_name = os.getenv(
         "QDRANT_COLLECTION", "legal_agent_rag_harrier_idf"
     )
@@ -43,17 +44,17 @@ class Settings:
     qdrant_upload_workers = _get_int("QDRANT_UPLOAD_WORKERS", 4)
     qdrant_timeout = _get_int("QDRANT_TIMEOUT", 120)
     qdrant_hnsw_ef = _get_int("QDRANT_HNSW_EF", 64)
-    colbert_batch_size = _get_int("COLBERT_BATCH_SIZE", 8)
+    colbert_batch_size = _get_int("COLBERT_BATCH_SIZE", 16)
     cross_encoder_batch_size = _get_int("CROSS_ENCODER_BATCH_SIZE", 16)
-    retrieval_top_k = _get_int("RETRIEVAL_TOP_K", 80)
-    initial_fusion_top_k = _get_int("INITIAL_FUSION_TOP_K", 80)
-    colbert_top_k = _get_int("COLBERT_TOP_K", 40)
-    cross_encoder_top_k = _get_int("CROSS_ENCODER_TOP_K", 20)
+    retrieval_top_k = _get_int("RETRIEVAL_TOP_K", 60)
+    initial_fusion_top_k = _get_int("INITIAL_FUSION_TOP_K", 40)
+    colbert_top_k = _get_int("COLBERT_TOP_K", 20)
+    cross_encoder_top_k = _get_int("CROSS_ENCODER_TOP_K", 15)
     graph_seed_top_k = _get_int("GRAPH_SEED_TOP_K", 5)
     graph_top_k = _get_int("GRAPH_TOP_K", 10)
     context_top_k = _get_int("CONTEXT_TOP_K", 10)
-    final_top_k = _get_int("FINAL_TOP_K", 20)
-    rerank_max_chars = _get_int("RERANK_MAX_CHARS", 3000)
+    final_top_k = _get_int("FINAL_TOP_K", 8)
+    rerank_max_chars = _get_int("RERANK_MAX_CHARS", 800)
     graph_path = os.getenv(
         "GRAPH_PATH",
         "data/indexes/graph/legal_graph.pkl",

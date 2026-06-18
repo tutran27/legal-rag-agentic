@@ -92,7 +92,12 @@ def run_single(args: argparse.Namespace) -> None:
     print(f"Khởi tạo pipeline xong: {time.perf_counter() - init_started:.3f}s")
     try:
         print("================ RUN INFERENCE ==================")
-        result = pipeline.run(args.query, question_id=args.question_id)
+        try:
+            result = pipeline.run(args.query, question_id=args.question_id)
+        except ValueError as error:
+            print("================ INFERENCE FAILED ==================")
+            print(str(error))
+            return
     finally:
         print("================ PIPELINE CLOSE ==================")
         pipeline.close()

@@ -49,14 +49,11 @@ GRAPH_TERMS = {
 
 def build_qdrant_filter(
     filters: RetrievalFilter,
-    include_taxonomy: bool = True,
 ) -> models.Filter | None:
     conditions = []
     fields = (
         ("doc_code", filters.doc_codes),
         ("doc_type", filters.doc_types),
-        ("domain", filters.domains if include_taxonomy else []),
-        ("sector", filters.sectors if include_taxonomy else []),
     )
     for key, values in fields:
         if values:
@@ -96,9 +93,13 @@ class InferencePipeline:
         self.cross_encoder = cross_encoder or self._load_cross_encoder()
         self.qdrant_client = qdrant_client or QdrantClient(
             url=settings.qdrant_url,
+            api_key=settings.qdrant_api_key,
             prefer_grpc=True,
             timeout=settings.qdrant_timeout,
         )
+        self._planning_cache: dict[str, Any] = {}
+        self._dense_cache: dict[str, Any] = {}
+        self._qdrant_cache: dict[tuple[Any, ...], list[Evidence]] = {}
         if preload_graph_index:
             load_graph(settings.graph_path)
         self.model_load_latency = time.perf_counter() - started
@@ -130,6 +131,143 @@ class InferencePipeline:
     def close(self) -> None:
         self.qdrant_client.close()
 
+    @staticmethod
+    def _filter_cache_key(qdrant_filter: models.Filter | None) -> str:
+        if qdrant_filter is None:
+            return ""
+        return json.dumps(
+            qdrant_filter.model_dump(),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def _get_planning(self, question: str):
+        if not hasattr(self, "_planning_cache"):
+            self._planning_cache = {}
+        cached = self._planning_cache.get(question)
+        if cached is not None:
+            return cached
+        planning = QueryPlannerAgent(self.llm).run(question)
+        self._planning_cache[question] = planning
+        return planning
+
+    def _get_dense_vectors(self, query_texts: list[str]):
+        if not hasattr(self, "_dense_cache"):
+            self._dense_cache = {}
+        missing = [text for text in query_texts if text not in self._dense_cache]
+        if missing:
+            vectors = embed_dense(
+                missing,
+                self.dense_model,
+                is_query=True,
+            )
+            for text, vector in zip(missing, vectors):
+                self._dense_cache[text] = vector
+        return [self._dense_cache[text] for text in query_texts]
+
+    def _get_qdrant_cached_results(
+        self,
+        queries,
+        retrieval_plan,
+        qdrant_filter,
+        dense_vectors,
+    ):
+        if not hasattr(self, "_qdrant_cache"):
+            self._qdrant_cache = {}
+        if dense_vectors is None:
+            dense_vectors = [None] * len(queries)
+        top_n = min(
+            settings.retrieval_top_k,
+            max(
+                retrieval_plan.top_k_bm25,
+                retrieval_plan.top_k_dense,
+                retrieval_plan.top_k_sparse,
+            ),
+        )
+        filter_key = self._filter_cache_key(qdrant_filter)
+        cache_hits: list[list[Evidence] | None] = []
+        miss_indices: list[int] = []
+        miss_queries = []
+        miss_dense_vectors = []
+
+        for index, (search_query, dense_vector) in enumerate(
+            zip(queries, dense_vectors)
+        ):
+            cache_key = (
+                search_query.text,
+                filter_key,
+                top_n,
+                retrieval_plan.use_dense,
+                retrieval_plan.use_bm25 or retrieval_plan.use_sparse,
+            )
+            cached = self._qdrant_cache.get(cache_key)
+            if cached is None:
+                miss_indices.append(index)
+                miss_queries.append(search_query.text)
+                miss_dense_vectors.append(dense_vector)
+                cache_hits.append(None)
+            else:
+                cache_hits.append(cached)
+
+        if miss_queries:
+            fresh = hybrid_search_batch(
+                miss_queries,
+                dense_st=self.dense_model,
+                flt=qdrant_filter,
+                top_n=top_n,
+                use_dense=retrieval_plan.use_dense,
+                use_sparse=(
+                    retrieval_plan.use_bm25 or retrieval_plan.use_sparse
+                ),
+                client=self.qdrant_client,
+                dense_vectors=miss_dense_vectors,
+            )
+            for index, query_text, result in zip(
+                miss_indices,
+                miss_queries,
+                fresh,
+            ):
+                cache_key = (
+                    query_text,
+                    filter_key,
+                    top_n,
+                    retrieval_plan.use_dense,
+                    retrieval_plan.use_bm25 or retrieval_plan.use_sparse,
+                )
+                self._qdrant_cache[cache_key] = result
+                cache_hits[index] = result
+
+        return [result or [] for result in cache_hits]
+
+    def _get_exact_results(
+        self,
+        question: str,
+        doc_codes,
+        current_only: bool,
+        top_k: int,
+    ):
+        if not hasattr(self, "_qdrant_cache"):
+            self._qdrant_cache = {}
+        cache_key = (
+            question,
+            tuple(sorted(doc_codes or [])),
+            current_only,
+            top_k,
+        )
+        cached = self._qdrant_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        result = exact_search(
+            question,
+            doc_codes=doc_codes,
+            top_k=top_k,
+            current_only=current_only,
+            client=self.qdrant_client,
+        )
+        self._qdrant_cache[cache_key] = result
+        return result
+
     def _run_hybrid(
         self,
         queries,
@@ -141,30 +279,17 @@ class InferencePipeline:
             self._print(
                 f"Hybrid {index}/{len(queries)}: {search_query.text}"
             )
-        return hybrid_search_batch(
-            [search_query.text for search_query in queries],
-            dense_st=self.dense_model,
-            flt=qdrant_filter,
-            top_n=min(
-                settings.retrieval_top_k,
-                max(
-                    retrieval_plan.top_k_bm25,
-                    retrieval_plan.top_k_dense,
-                    retrieval_plan.top_k_sparse,
-                ),
-            ),
-            use_dense=retrieval_plan.use_dense,
-            use_sparse=(
-                retrieval_plan.use_bm25 or retrieval_plan.use_sparse
-            ),
-            client=self.qdrant_client,
-            dense_vectors=dense_vectors,
+        return self._get_qdrant_cached_results(
+            queries,
+            retrieval_plan,
+            qdrant_filter,
+            dense_vectors,
         )
 
     def _retrieve(self, question, plan, latencies):
         query_texts = [query.text for query in plan.queries]
         dense_vectors = (
-            embed_dense(query_texts, self.dense_model, is_query=True)
+            self._get_dense_vectors(query_texts)
             if plan.retrieval.use_dense
             else None
         )
@@ -175,22 +300,9 @@ class InferencePipeline:
             build_qdrant_filter(plan.filters),
             dense_vectors,
         )
-        if not any(hybrid_results) and (
-            plan.filters.domains or plan.filters.sectors
+        if (
+            not any(hybrid_results)
         ):
-            self._print(
-                "Không có kết quả taxonomy exact-match, bỏ domain/sector."
-            )
-            hybrid_results = self._run_hybrid(
-                plan.queries,
-                plan.retrieval,
-                build_qdrant_filter(
-                    plan.filters,
-                    include_taxonomy=False,
-                ),
-                dense_vectors,
-            )
-        if not any(hybrid_results):
             self._print(
                 "Không có kết quả với filter định danh, chỉ giữ is_current."
             )
@@ -207,12 +319,11 @@ class InferencePipeline:
         exact_results = []
         if plan.retrieval.use_exact:
             started = time.perf_counter()
-            exact_results = exact_search(
+            exact_results = self._get_exact_results(
                 question,
-                doc_codes=plan.filters.doc_codes,
-                top_k=min(plan.retrieval.top_k_exact, 20),
-                current_only=plan.filters.is_current is True,
-                client=self.qdrant_client,
+                plan.filters.doc_codes,
+                plan.filters.is_current is True,
+                min(plan.retrieval.top_k_exact, 20),
             )
             self._log_latency("Exact retrieval", started, latencies)
 
@@ -277,44 +388,32 @@ class InferencePipeline:
             ]
 
         started = time.perf_counter()
-        dense_vectors = embed_dense(
-            query_texts,
-            self.dense_model,
-            is_query=True,
-        )
-        flat_results = hybrid_search_batch(
-            query_texts,
-            dense_st=self.dense_model,
-            top_n=settings.retrieval_top_k,
-            use_dense=True,
-            use_sparse=True,
-            client=self.qdrant_client,
-            dense_vectors=dense_vectors,
-            filters=filters,
-        )
+        dense_vectors = self._get_dense_vectors(query_texts)
+        flat_results = []
+        offset = 0
+        for question, plan, _ in planned_items:
+            size = len(plan.queries)
+            q_queries = plan.queries
+            q_vectors = dense_vectors[offset : offset + size]
+            offset += size
+            flat_results.append(
+                self._run_hybrid(
+                    q_queries,
+                    plan.retrieval,
+                    build_qdrant_filter(plan.filters),
+                    q_vectors,
+                )
+            )
         hybrid_elapsed = time.perf_counter() - started
 
         results = []
-        offset = 0
-        for question, plan, latencies in planned_items:
-            size = len(plan.queries)
-            hybrid_results = flat_results[offset : offset + size]
-            vector_slice = dense_vectors[offset : offset + size]
-            offset += size
-
-            if not any(hybrid_results) and (
-                plan.filters.domains or plan.filters.sectors
+        for (question, plan, latencies), hybrid_results in zip(
+            planned_items,
+            flat_results,
+        ):
+            if (
+                not any(hybrid_results)
             ):
-                hybrid_results = self._run_hybrid(
-                    plan.queries,
-                    plan.retrieval,
-                    build_qdrant_filter(
-                        plan.filters,
-                        include_taxonomy=False,
-                    ),
-                    vector_slice,
-                )
-            if not any(hybrid_results):
                 hybrid_results = self._run_hybrid(
                     plan.queries,
                     plan.retrieval,
@@ -323,7 +422,7 @@ class InferencePipeline:
                             is_current=plan.filters.is_current
                         )
                     ),
-                    vector_slice,
+                    self._get_dense_vectors([q.text for q in plan.queries]),
                 )
             latencies["Hybrid retrieval"] = (
                 hybrid_elapsed / len(planned_items)
@@ -332,12 +431,11 @@ class InferencePipeline:
             exact_results = []
             if plan.retrieval.use_exact:
                 exact_started = time.perf_counter()
-                exact_results = exact_search(
+                exact_results = self._get_exact_results(
                     question,
-                    doc_codes=plan.filters.doc_codes,
-                    top_k=min(plan.retrieval.top_k_exact, 20),
-                    current_only=plan.filters.is_current is True,
-                    client=self.qdrant_client,
+                    plan.filters.doc_codes,
+                    plan.filters.is_current is True,
+                    min(plan.retrieval.top_k_exact, 20),
                 )
                 latencies["Exact retrieval"] = (
                     time.perf_counter() - exact_started
@@ -534,7 +632,7 @@ class InferencePipeline:
             final_candidates
         )[:15]
         started = time.perf_counter()
-        assessment = selector.run_with_sufficiency(
+        assessment = selector.run(
             question=question,
             understanding=understanding,
             candidates=document_candidates,
@@ -593,6 +691,16 @@ class InferencePipeline:
             )
             self._log_latency("Final verification", started, latencies)
 
+        if not verification.passed:
+            details = json.dumps(
+                verification.model_dump(),
+                ensure_ascii=False,
+            )
+            raise ValueError(
+                "Verification thất bại sau khi sửa câu trả lời: "
+                f"{details}"
+            )
+
         submission = SubmissionFormatterAgent().run(
             question_id=question_id,
             question=question,
@@ -614,7 +722,7 @@ class InferencePipeline:
         latencies: dict[str, float] = {}
         query_started = time.perf_counter()
         started = time.perf_counter()
-        planning = QueryPlannerAgent(self.llm).run_combined(question)
+        planning = self._get_planning(question)
         self._log_latency(
             "Understanding + query planning",
             started,
@@ -647,7 +755,7 @@ class InferencePipeline:
             query_started = time.perf_counter()
             started = time.perf_counter()
             try:
-                planning = QueryPlannerAgent(self.llm).run_combined(question)
+                planning = self._get_planning(question)
                 latencies["Understanding + query planning"] = (
                     time.perf_counter() - started
                 )

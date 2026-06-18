@@ -21,7 +21,7 @@ def cross_encoder_rerank(
     candidates,
     model: CrossEncoder = None,
     model_name: str = model_name,
-    top_k: int = 30,
+    top_k: int = settings.final_top_k,
     batch_size: int = settings.cross_encoder_batch_size,
 ):
     if not candidates:
@@ -59,9 +59,9 @@ def cross_encoder_rerank(
                 "cross_encoder_rerank_score": raw_score,
                 "cross_encoder_normalized_score": ce_score,
                 "final_score": (
-                    0.7 * ce_score
-                    + 0.2 * colbert_score
-                    + 0.1 * fusion_score
+                    0.4 * ce_score
+                    + 0.4 * colbert_score
+                    + 0.2 * fusion_score
                 ),
             }
         )

@@ -30,7 +30,11 @@ def main(
     if not files:
         raise FileNotFoundError(f"Không tìm thấy shard trong {shards}")
 
-    client = QdrantClient(url=settings.qdrant_url, prefer_grpc=True)
+    client = QdrantClient(
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
+        prefer_grpc=True,
+    )
     collection_existed = client.collection_exists(settings.collection_name)
     checkpoint = {
         "shard": 0,

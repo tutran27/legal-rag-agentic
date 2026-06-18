@@ -10,7 +10,8 @@ from src.schema.agent_schemas import (
 )
 
 
-REASONER_MAX_TOKENS = 400
+REASONER_MAX_TOKENS = 384
+REASONER_EVIDENCE_CHARS = 1200
 
 
 class ReasonerAgent:
@@ -53,7 +54,7 @@ class ReasonerAgent:
                     "text": (
                         item.metadata.get("content_text")
                         or item.text
-                    ),
+                    )[:REASONER_EVIDENCE_CHARS],
                 }
             )
 

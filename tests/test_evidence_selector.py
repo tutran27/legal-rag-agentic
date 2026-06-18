@@ -5,21 +5,27 @@ from src.schema.agent_schemas import Evidence, LegalUnderstanding
 class FakeLLM:
     def call_llm_json(self, **kwargs):
         return {
-            "selected": [
-                {
-                    "unit_id": "u2",
-                    "role": "main",
-                    "reason": "Direct evidence",
-                    "supported_claims": ["Condition"],
-                },
-                {
-                    "unit_id": "unknown",
-                    "role": "supporting",
-                    "reason": "Invalid",
-                    "supported_claims": [],
-                },
-            ],
-            "rejected": [],
+            "selection": {
+                "selected": [
+                    {
+                        "unit_id": "u2",
+                        "role": "main",
+                        "reason": "Direct evidence",
+                        "supported_claims": ["Condition"],
+                    },
+                    {
+                        "unit_id": "unknown",
+                        "role": "supporting",
+                        "reason": "Invalid",
+                        "supported_claims": [],
+                    },
+                ],
+                "rejected": [],
+            },
+            "sufficiency": {
+                "is_sufficient": True,
+                "reason": "Có evidence liên quan",
+            },
         }
 
 
@@ -51,9 +57,13 @@ def test_evidence_selector_validates_ids():
         Evidence(unit_id="u1", chunk_id="c1", text="One"),
         Evidence(unit_id="u2", chunk_id="c2", text="Two"),
     ]
-    result = EvidenceSelectorAgent(FakeLLM()).run("Question", candidates)
+    result = EvidenceSelectorAgent(FakeLLM()).run(
+        "Question",
+        LegalUnderstanding(),
+        candidates,
+    )
 
-    assert [item.unit_id for item in result.selected] == ["u2"]
+    assert [item.unit_id for item in result.selection.selected] == ["u2"]
 
 
 def test_get_selected_evidence_keeps_multiple_articles_per_document():
@@ -94,9 +104,13 @@ def test_selector_keeps_clear_top_score():
         Evidence(unit_id="u2", text="Second", final_score=1.8),
     ]
 
-    result = EvidenceSelectorAgent(FakeLLM()).run("Question", candidates)
+    result = EvidenceSelectorAgent(FakeLLM()).run(
+        "Question",
+        LegalUnderstanding(),
+        candidates,
+    )
 
-    assert result.selected[0].unit_id == "top"
+    assert result.selection.selected[0].unit_id == "top"
 
 
 def test_combined_evidence_assessment_uses_one_llm_call():
@@ -109,7 +123,7 @@ def test_combined_evidence_assessment_uses_one_llm_call():
         )
     ]
 
-    result = EvidenceSelectorAgent(llm).run_with_sufficiency(
+    result = EvidenceSelectorAgent(llm).run(
         question="Điều kiện hỗ trợ là gì?",
         understanding=LegalUnderstanding(),
         candidates=candidates,

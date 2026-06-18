@@ -8,7 +8,8 @@ from src.schema.agent_schemas import (
 )
 
 
-VERIFIER_MAX_TOKENS = 200
+VERIFIER_MAX_TOKENS = 128
+VERIFIER_EVIDENCE_CHARS = 900
 
 
 class VerificationAgent:
@@ -36,7 +37,9 @@ class VerificationAgent:
                 "doc_code": item.doc_code or item.metadata.get("doc_code"),
                 "article": item.article or item.metadata.get("article"),
                 "status": item.metadata.get("status"),
-                "text": item.metadata.get("content_text") or item.text,
+                "text": (
+                    item.metadata.get("content_text") or item.text
+                )[:VERIFIER_EVIDENCE_CHARS],
             }
             for item in evidence
         ]

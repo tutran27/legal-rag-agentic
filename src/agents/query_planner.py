@@ -1,150 +1,58 @@
-import json
 import re
+import unicodedata
 from typing import Any
 
 from src.schema.agent_schemas import (
     LegalUnderstanding,
     PlanningResult,
     QueryPlan,
+    RetrievalPlan,
     SearchQuery,
 )
 
 
-LEGAL_CONTEXTS = {
-    "condition_question": (
-        "tiêu chí và điều kiện được hỗ trợ"
-    ),
-    "procedure_question": (
-        "hồ sơ và thủ tục thực hiện"
-    ),
-    "obligation_question": (
-        "nghĩa vụ và trách nhiệm thực hiện"
-    ),
-    "penalty_question": (
-        "hành vi vi phạm và mức xử phạt"
-    ),
-    "definition_question": (
-        "khái niệm và tiêu chí xác định"
-    ),
-    "rights_question": (
-        "quyền lợi và điều kiện được hưởng"
-    ),
+QUERY_PLAN_MAX_TOKENS = 512
+
+INTENT_CONTEXT = {
+    "condition_question": "điều kiện được hỗ trợ theo quy định pháp luật",
+    "procedure_question": "hồ sơ và thủ tục thực hiện theo quy định pháp luật",
+    "obligation_question": "nghĩa vụ và trách nhiệm thực hiện theo quy định pháp luật",
+    "penalty_question": "hành vi vi phạm và mức xử phạt theo quy định pháp luật",
+    "definition_question": "khái niệm và tiêu chí xác định theo quy định pháp luật",
+    "rights_question": "quyền lợi và điều kiện được hưởng theo quy định pháp luật",
 }
-QUERY_PLAN_MAX_TOKENS = 350
+DEFAULT_CONTEXT = "đối tượng áp dụng căn cứ pháp lý phạm vi điều kiện thực hiện"
 
-
-def _tokens(text: str) -> set[str]:
-    return set(re.findall(r"\w+", text.lower(), flags=re.UNICODE))
-
-
-class QueryPlannerAgent:
-    def __init__(self, llm: Any):
-        self.llm = llm
-
-    def run(
-        self,
-        question: str,
-        understanding: LegalUnderstanding,
-    ) -> QueryPlan:
-        prompt = """
-Bạn là Query Planner cho hệ thống Legal RAG Việt Nam.
-
-Tạo đúng 3 truy vấn có mục đích khác nhau:
-1. original: giữ nguyên câu hỏi.
-2. legal_rewrite: lệnh đề pháp lý mở rộng ngữ cảnh.
-3. keyword: tập hợp thuật ngữ pháp lý để tìm bằng BM25.
-
-Yêu cầu bắt buộc:
-- Không được tạo ba cách diễn đạt cùng một nội dung.
-- legal_rewrite không phải câu hỏi, không có dấu "?" hoặc từ nghi vấn.
-- legal_rewrite phải ngắn gọn, bám sát chủ thể và ý định của original.
-- Chỉ thêm 1-2 khái niệm pháp lý trực tiếp liên quan, không mở rộng sang
-  ngoại lệ, hồ sơ hoặc thủ tục nếu câu hỏi không đề cập.
-- keyword là cụm từ khóa ngắn, giữ chủ thể chính và ý định pháp lý.
-
-Ví dụ:
-original:
-"Doanh nghiệp nhỏ và vừa phải đáp ứng điều kiện nào để được hỗ trợ?"
-
-legal_rewrite:
-"Tiêu chí và điều kiện doanh nghiệp nhỏ và vừa được hỗ trợ"
-
-keyword:
-"doanh nghiệp nhỏ và vừa tiêu chí điều kiện hỗ trợ"
-
-Chỉ đặt doc_codes khi câu hỏi nêu rõ số hiệu văn bản.
-Chỉ đặt doc_types, domains, sectors khi chắc chắn.
-is_current=true nếu hỏi pháp luật hiện hành.
-
-Chỉ trả JSON theo schema:
-{
-  "queries": [
-    {"query_type": "original", "text": "...", "reason": "..."},
-    {"query_type": "legal_rewrite", "text": "...", "reason": "..."},
-    {"query_type": "keyword", "text": "...", "reason": "..."}
-  ],
-  "filters": {
-    "doc_codes": [],
-    "doc_types": [],
-    "domains": [],
-    "sectors": [],
-    "is_current": true
-  },
-  "retrieval": {
-    "use_exact": true,
-    "use_bm25": true,
-    "use_dense": true,
-    "use_sparse": true,
-    "use_colbert": true,
-    "use_cross_encoder": true,
-    "use_graph": true,
-    "use_context": true,
-    "use_summary": false,
-    "top_k_exact": 20,
-    "top_k_bm25": 80,
-    "top_k_dense": 80,
-    "top_k_sparse": 80,
-    "top_k_colbert": 40,
-    "top_k_cross_encoder": 20,
-    "top_k_graph": 10,
-    "top_k_summary": 30
-  }
+TAXONOMY_ALIASES = {
+    "doanh nghiep": "doanh nghiệp",
+    "hop tac xa": "hợp tác xã",
+    "doanh nghiep hop tac xa": "doanh nghiệp, hợp tác xã",
+    "thue": "thuế",
+    "phi le phi": "phí, lệ phí",
+    "lao dong": "lao động",
+    "bao hiem xa hoi": "bảo hiểm xã hội",
+    "ke toan": "kế toán",
+    "hop dong": "hợp đồng",
+    "xu phat": "xử phạt",
+    "dau tu": "đầu tư",
+    "ke hoach va dau tu": "kế hoạch và đầu tư",
 }
-"""
-        data = self.llm.call_llm_json(
-            query=json.dumps(
-                {
-                    "question": question,
-                    "understanding": understanding.model_dump(),
-                },
-                ensure_ascii=False,
-            ),
-            system_prompt=prompt,
-            max_new_tokens=QUERY_PLAN_MAX_TOKENS,
-            temperature=0.1,
-        )
 
-        return self._normalize_plan(
-            question,
-            understanding,
-            QueryPlan(**data),
-        )
+QUERY_PLANNER_PROMPT = """
+Bạn là agent phân tích câu hỏi và tạo truy vấn tìm kiếm cho Legal RAG Việt Nam.
 
-    def run_combined(self, question: str) -> PlanningResult:
-        prompt = """
-Bạn là agent phân tích và lập kế hoạch retrieval cho Legal RAG Việt Nam.
-
-Trong một lần xử lý:
-1. Phân tích domain, intent, thực thể pháp lý và yêu cầu hiệu lực.
-2. Tạo đúng 3 query: original, legal_rewrite và keyword.
-3. Tạo filter và retrieval plan.
+Nhiệm vụ:
+1. Phân tích câu hỏi.
+2. Tạo đúng 3 query: original, legal_rewrite, keyword.
+3. Tạo filter định danh nếu chắc chắn.
 
 Quy tắc:
 - original giữ nguyên câu hỏi.
-- legal_rewrite là lệnh đề pháp lý ngắn, không có dấu hỏi.
-- keyword là cụm từ khóa BM25 ngắn, không trùng legal_rewrite.
+- legal_rewrite là cụm truy vấn pháp lý ngắn, có dấu tiếng Việt, không có dấu hỏi.
+- keyword là cụm từ khóa BM25 ngắn, có dấu tiếng Việt, không trùng legal_rewrite.
+- Không dùng slug, dấu "_" hoặc tiếng Việt không dấu.
 - Chỉ đặt doc_codes khi câu hỏi nêu rõ số hiệu văn bản.
-- Chỉ đặt taxonomy khi chắc chắn; mặc định is_current=true.
+- Chỉ đặt domain/sector khi chắc chắn; mặc định is_current=true.
 
 Chỉ trả JSON:
 {
@@ -171,41 +79,75 @@ Chỉ trả JSON:
       "domains": [],
       "sectors": [],
       "is_current": true
-    },
-    "retrieval": {
-      "use_exact": true,
-      "use_bm25": true,
-      "use_dense": true,
-      "use_sparse": true,
-      "use_colbert": true,
-      "use_cross_encoder": true,
-      "use_graph": true,
-      "use_context": true,
-      "use_summary": false,
-      "top_k_exact": 20,
-      "top_k_bm25": 80,
-      "top_k_dense": 80,
-      "top_k_sparse": 80,
-      "top_k_colbert": 40,
-      "top_k_cross_encoder": 20,
-      "top_k_graph": 10,
-      "top_k_summary": 30
     }
   }
 }
 """
+
+
+def _tokens(text: str) -> set[str]:
+    return set(re.findall(r"\w+", text.lower(), flags=re.UNICODE))
+
+
+def _clean_text(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "").replace("_", " ")).strip()
+
+
+def _strip_accents(text: str) -> str:
+    normalized = unicodedata.normalize("NFD", text)
+    text = "".join(
+        char for char in normalized if unicodedata.category(char) != "Mn"
+    )
+    return text.replace("đ", "d").replace("Đ", "D")
+
+
+def _has_vietnamese_accent(text: str) -> bool:
+    text = text or ""
+    return _strip_accents(text) != text
+
+
+def _normalize_taxonomy(value: str) -> str:
+    text = re.sub(r"[_-]+", " ", str(value or "")).strip().lower()
+    text = re.sub(r"\s+", " ", text)
+    return TAXONOMY_ALIASES.get(_strip_accents(text), text)
+
+
+def _unique_taxonomy(values: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for value in values:
+        value = _normalize_taxonomy(value)
+        if value and value not in seen:
+            result.append(value)
+            seen.add(value)
+    return result
+
+
+def _is_weak_query(query: SearchQuery | None, question_tokens: set[str]) -> bool:
+    if query is None:
+        return True
+    text = query.text
+    return (
+        "?" in text
+        or "_" in text
+        or not _has_vietnamese_accent(text)
+        or len(_tokens(text) - question_tokens) < 1
+    )
+
+
+class QueryPlannerAgent:
+    def __init__(self, llm: Any):
+        self.llm = llm
+
+    def run(self, question: str) -> PlanningResult:
         data = self.llm.call_llm_json(
             query=question,
-            system_prompt=prompt,
+            system_prompt=QUERY_PLANNER_PROMPT,
             max_new_tokens=QUERY_PLAN_MAX_TOKENS,
             temperature=0.1,
         )
         result = PlanningResult(**data)
-        plan = self._normalize_plan(
-            question,
-            result.understanding,
-            result.plan,
-        )
+        plan = self._normalize_plan(question, result.understanding, result.plan)
         return result.model_copy(update={"plan": plan})
 
     def _normalize_plan(
@@ -215,60 +157,69 @@ Chỉ trả JSON:
         plan: QueryPlan,
     ) -> QueryPlan:
         queries = {query.query_type: query for query in plan.queries}
-        original_tokens = _tokens(question)
-
-        topic = " ".join(understanding.legal_entities).strip()
-        if not topic:
-            topic = understanding.domain or question.rstrip(" ?")
-        context = LEGAL_CONTEXTS.get(
-            understanding.intent or "",
-            "đối tượng áp dụng căn cứ pháp lý phạm vi điều kiện thực hiện",
-        )
+        question_tokens = _tokens(question)
+        topic = self._topic(question, understanding)
+        context = INTENT_CONTEXT.get(understanding.intent or "", DEFAULT_CONTEXT)
 
         legal_rewrite = queries.get("legal_rewrite")
-        legal_is_weak = (
-            legal_rewrite is None
-            or "?" in legal_rewrite.text
-            or len(_tokens(legal_rewrite.text) - original_tokens) < 1
-        )
-        if legal_is_weak:
+        if _is_weak_query(legal_rewrite, question_tokens):
             legal_rewrite = SearchQuery(
                 query_type="legal_rewrite",
                 text=f"{topic} {context}",
-                reason="Mở rộng theo các khái niệm pháp lý liên quan",
+                reason="Mở rộng theo khái niệm pháp lý liên quan",
             )
 
         keyword = queries.get("keyword")
-        keyword_is_weak = (
-            keyword is None
-            or len(_tokens(keyword.text) - original_tokens) < 1
+        if (
+            _is_weak_query(keyword, question_tokens)
             or keyword.text == legal_rewrite.text
-        )
-        if keyword_is_weak:
+        ):
             keyword = SearchQuery(
                 query_type="keyword",
-                text=f"{topic} {context.replace(' và ', ' ')}",
+                text=f"{topic} {self._keyword_context(context, understanding)}",
                 reason="Từ khóa pháp lý bám sát câu hỏi",
             )
 
         plan.queries = [
             SearchQuery(
                 query_type="original",
-                text=question,
+                text=_clean_text(question),
                 reason="Câu hỏi gốc",
             ),
-            legal_rewrite,
-            keyword,
+            legal_rewrite.model_copy(
+                update={"text": _clean_text(legal_rewrite.text)}
+            ),
+            keyword.model_copy(update={"text": _clean_text(keyword.text)}),
         ]
+        plan.filters = plan.filters.model_copy(
+            update={
+                "domains": _unique_taxonomy(plan.filters.domains),
+                "sectors": _unique_taxonomy(plan.filters.sectors),
+            }
+        )
+        plan.retrieval = RetrievalPlan()
         return plan
 
+    def _topic(
+        self,
+        question: str,
+        understanding: LegalUnderstanding,
+    ) -> str:
+        topic = " ".join(understanding.legal_entities).strip()
+        topic = topic or understanding.domain or question.rstrip(" ?")
+        topic = _clean_text(topic)
+        return topic if _has_vietnamese_accent(topic) else _clean_text(question.rstrip(" ?"))
 
-if __name__ == "__main__":
-    from src.agents.legal_understanding import LegalUnderstandingAgent
-    from src.generation.endpoint import EndpointLLMClient
-
-    llm = EndpointLLMClient()
-    question = "Doanh nghiệp SME có thể có bao nhiêu người làm việc?"
-    understanding = LegalUnderstandingAgent(llm).run(question)
-    plan = QueryPlannerAgent(llm).run(question, understanding)
-    print(json.dumps(plan.model_dump(), ensure_ascii=False, indent=2))
+    @staticmethod
+    def _keyword_context(
+        context: str,
+        understanding: LegalUnderstanding,
+    ) -> str:
+        keyword_context = (
+            context.replace("theo quy định pháp luật", "")
+            .replace("được ", "")
+            .strip()
+        )
+        if understanding.intent == "condition_question":
+            return f"tiêu chí {keyword_context}"
+        return keyword_context

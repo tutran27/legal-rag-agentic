@@ -92,6 +92,7 @@ def hybrid_search_batch(
     owns_client = client is None
     client = client or QdrantClient(
         url=qdrant_url,
+        api_key=settings.qdrant_api_key,
         prefer_grpc=True,
         timeout=settings.qdrant_timeout,
     )

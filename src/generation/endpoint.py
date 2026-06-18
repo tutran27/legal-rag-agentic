@@ -20,6 +20,13 @@ DEFAULT_LOCAL_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 JSON_RETRY_ATTEMPTS = 2
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _json_repair_prompt(system_prompt: str | None) -> str:
     return "\n\n".join(
         [
@@ -163,24 +170,46 @@ class LocalQwenLLMClient:
             or os.getenv("LOCAL_LLM_MODEL")
             or DEFAULT_LOCAL_MODEL
         )
-        self.max_model_len = max_model_len or int(
-            os.getenv("LOCAL_LLM_MAX_MODEL_LEN", "4096")
+        env_max_model_len = os.getenv("LOCAL_LLM_MAX_MODEL_LEN")
+        self.max_model_len = (
+            max_model_len
+            if max_model_len is not None
+            else int(env_max_model_len) if env_max_model_len else None
         )
+        self.load_in_4bit = _env_bool("LOCAL_LLM_LOAD_IN_4BIT", True)
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
             trust_remote_code=True,
         )
-        dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+        model_kwargs = {
+            "device_map": "auto" if torch.cuda.is_available() else None,
+            "trust_remote_code": True,
+        }
+        if self.load_in_4bit and torch.cuda.is_available():
+            from transformers import BitsAndBytesConfig
+
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+            )
+        else:
+            model_kwargs["torch_dtype"] = (
+                torch.bfloat16 if torch.cuda.is_available() else torch.float32
+            )
         self.model = AutoModelForCausalLM.from_pretrained(
             self.model_name,
-            torch_dtype=dtype,
-            device_map="auto" if torch.cuda.is_available() else None,
-            trust_remote_code=True,
+            **model_kwargs,
         )
         self.model.eval()
 
     def health(self) -> dict[str, Any]:
-        return {"backend": "local", "model": self.model_name}
+        return {
+            "backend": "local",
+            "model": self.model_name,
+            "load_in_4bit": self.load_in_4bit,
+        }
 
     def generate(
         self,
@@ -206,12 +235,13 @@ class LocalQwenLLMClient:
             tokenize=False,
             add_generation_prompt=True,
         )
-        inputs = self.tokenizer(
-            text,
-            return_tensors="pt",
-            truncation=True,
-            max_length=self.max_model_len,
-        ).to(self.model.device)
+        tokenize_kwargs = {
+            "return_tensors": "pt",
+            "truncation": self.max_model_len is not None,
+        }
+        if self.max_model_len is not None:
+            tokenize_kwargs["max_length"] = self.max_model_len
+        inputs = self.tokenizer(text, **tokenize_kwargs).to(self.model.device)
 
         token_limit = max_tokens or max_new_tokens or 1536
         generation_kwargs = {

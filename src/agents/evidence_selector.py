@@ -11,7 +11,8 @@ from src.schema.agent_schemas import (
 )
 
 
-EVIDENCE_SELECTION_MAX_TOKENS = 650
+EVIDENCE_ASSESSMENT_MAX_TOKENS = 384
+EVIDENCE_TEXT_CHARS = 600
 
 
 class EvidenceSelectorAgent:
@@ -21,90 +22,9 @@ class EvidenceSelectorAgent:
     def run(
         self,
         question: str,
-        candidates: list[Evidence],
-        max_candidates: int = 15,
-        max_selected: int = 5,
-        score_gap: float = 0.1,
-    ) -> EvidenceSelectionResult:
-        if not candidates:
-            return EvidenceSelectionResult(selected=[])
-
-        candidates = candidates[:max_candidates]
-        evidence_data = [
-            {
-                "unit_id": candidate.unit_id,
-                "doc_code": candidate.metadata.get("doc_code"),
-                "article": candidate.metadata.get("article"),
-                "status": candidate.metadata.get("status"),
-                "final_score": candidate.final_score,
-                "text": (
-                    candidate.metadata.get("content_text")
-                    or candidate.text
-                )[:500],
-            }
-            for candidate in candidates
-        ]
-
-        prompt = f"""
-Bạn là Evidence Selector cho hệ thống Legal RAG Việt Nam.
-
-Chọn tối đa {max_selected} evidence cần thiết để trả lời câu hỏi.
-
-Quy tắc:
-- Chỉ chọn unit_id có trong danh sách.
-- Ưu tiên evidence có final_score cao.
-- Nếu điểm chênh lệch nhỏ, so sánh nội dung và chọn evidence trả lời
-  trực tiếp hơn.
-- main: trực tiếp chứa căn cứ trả lời.
-- supporting: bổ sung điều kiện, ngoại lệ hoặc giải thích.
-- background: chỉ cung cấp bối cảnh cần thiết.
-- Không chọn nhiều evidence trùng nội dung.
-- Không tự trả lời câu hỏi.
-
-Chỉ trả về JSON:
-{{
-  "selected": [
-    {{
-      "unit_id": "...",
-      "role": "main | supporting | background",
-      "reason": "...",
-      "supported_claims": ["..."]
-    }}
-  ],
-  "rejected": [
-    {{
-      "unit_id": "...",
-      "reason": "..."
-    }}
-  ]
-}}
-"""
-        data = self.llm.call_llm_json(
-            query=json.dumps(
-                {
-                    "question": question,
-                    "candidates": evidence_data,
-                },
-                ensure_ascii=False,
-            ),
-            system_prompt=prompt,
-            max_new_tokens=EVIDENCE_SELECTION_MAX_TOKENS,
-            temperature=0.0,
-        )
-
-        return self._normalize_selection(
-            EvidenceSelectionResult(**data),
-            candidates,
-            max_selected,
-            score_gap,
-        )
-
-    def run_with_sufficiency(
-        self,
-        question: str,
         understanding: LegalUnderstanding,
         candidates: list[Evidence],
-        max_candidates: int = 15,
+        max_candidates: int = 10,
         max_selected: int = 5,
         score_gap: float = 0.1,
     ) -> EvidenceAssessment:
@@ -130,7 +50,7 @@ Chỉ trả về JSON:
                 "text": (
                     candidate.metadata.get("content_text")
                     or candidate.text
-                )[:1000],
+                )[:EVIDENCE_TEXT_CHARS],
             }
             for candidate in candidates
         ]
@@ -180,7 +100,7 @@ Chỉ trả JSON:
                 ensure_ascii=False,
             ),
             system_prompt=prompt,
-            max_new_tokens=EVIDENCE_SELECTION_MAX_TOKENS,
+            max_new_tokens=EVIDENCE_ASSESSMENT_MAX_TOKENS,
             temperature=0.0,
         )
         assessment = EvidenceAssessment(**data)
