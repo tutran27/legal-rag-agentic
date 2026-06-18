@@ -17,6 +17,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "đúng yêu cầu."
 )
 DEFAULT_LOCAL_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 JSON_RETRY_ATTEMPTS = 2
 
 
@@ -152,6 +153,106 @@ class EndpointLLMClient:
                 current_prompt = _json_repair_prompt(system_prompt)
         raise ValueError(
             "LLM trả về JSON không hợp lệ sau "
+            f"{JSON_RETRY_ATTEMPTS + 1} lần thử:\n{output}"
+        ) from last_error
+
+
+class GroqLLMClient:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout: int | None = None,
+        session: requests.Session | None = None,
+    ) -> None:
+        self.api_key = api_key or os.getenv("GROQ_API_KEY")
+        if not self.api_key:
+            raise ValueError("Thiếu GROQ_API_KEY để dùng LLM_BACKEND=groq.")
+        self.model = model or os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL
+        self.base_url = (
+            base_url
+            or os.getenv("GROQ_BASE_URL")
+            or "https://api.groq.com/openai/v1"
+        ).rstrip("/")
+        self.timeout = timeout or int(os.getenv("GROQ_TIMEOUT", "120"))
+        self.session = session or requests.Session()
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "backend": "groq",
+            "model": self.model,
+            "base_url": self.base_url,
+        }
+
+    def generate(
+        self,
+        query: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.0,
+        max_new_tokens: int | None = None,
+        max_tokens: int | None = None,
+        top_p: float = 0.9,
+        **_: Any,
+    ) -> str:
+        token_limit = max_tokens or max_new_tokens or 1536
+        response = self.session.post(
+            f"{self.base_url}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": system_prompt or DEFAULT_SYSTEM_PROMPT,
+                    },
+                    {"role": "user", "content": query},
+                ],
+                "max_tokens": token_limit,
+                "temperature": temperature,
+                "top_p": top_p,
+            },
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        data = response.json()
+        choices = data.get("choices")
+        if not choices:
+            raise ValueError("Groq không trả về choices.")
+        content = choices[0].get("message", {}).get("content")
+        if not isinstance(content, str):
+            raise ValueError("Groq không trả về message.content dạng chuỗi.")
+        return content
+
+    def call_llm_json(
+        self,
+        query: str,
+        system_prompt: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        last_error: Exception | None = None
+        output = ""
+        current_query = query
+        current_prompt = system_prompt
+        for attempt in range(JSON_RETRY_ATTEMPTS + 1):
+            output = self.generate(
+                query=current_query,
+                system_prompt=current_prompt,
+                **kwargs,
+            )
+            try:
+                return EndpointLLMClient.extract_json_object(output)
+            except (json.JSONDecodeError, ValueError) as error:
+                last_error = error
+                if attempt >= JSON_RETRY_ATTEMPTS:
+                    break
+                current_query = _json_repair_query(query, output)
+                current_prompt = _json_repair_prompt(system_prompt)
+        raise ValueError(
+            "Groq trả về JSON không hợp lệ sau "
             f"{JSON_RETRY_ATTEMPTS + 1} lần thử:\n{output}"
         ) from last_error
 
@@ -297,13 +398,16 @@ class LocalQwenLLMClient:
 def create_llm_client(
     backend: str | None = None,
     local_model: str | None = None,
-) -> EndpointLLMClient | LocalQwenLLMClient:
-    selected = (backend or os.getenv("LLM_BACKEND") or "endpoint").lower()
+) -> EndpointLLMClient | GroqLLMClient | LocalQwenLLMClient:
+    selected = (backend or os.getenv("LLM_BACKEND") or "groq").lower()
+    if selected == "groq":
+        return GroqLLMClient()
     if selected == "endpoint":
         return EndpointLLMClient()
     if selected == "local":
         return LocalQwenLLMClient(model_name=local_model)
-    raise ValueError("LLM_BACKEND chỉ hỗ trợ 'endpoint' hoặc 'local'.")
+    supported = "groq, endpoint, local"
+    raise ValueError(f"LLM_BACKEND không hợp lệ: {selected}. Hỗ trợ: {supported}.")
 
 
 if __name__ == "__main__":

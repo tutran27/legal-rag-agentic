@@ -1,6 +1,10 @@
 from unittest.mock import Mock
 
-from src.generation.endpoint import EndpointLLMClient
+from src.generation.endpoint import (
+    EndpointLLMClient,
+    GroqLLMClient,
+    create_llm_client,
+)
 
 
 def test_generate_calls_endpoint_with_compatible_payload():

@@ -13,14 +13,14 @@ Pipeline hiện tại kết hợp:
 - Exact search theo mã văn bản/điều nếu câu hỏi có định danh rõ.
 - Graph/context expansion để bổ sung văn bản hoặc đơn vị pháp lý liên quan.
 - ColBERT và cross-encoder rerank.
-- Evidence selection + sufficiency trong một LLM call.
-- Reasoning, verification, formatter và validate schema submission.
+- Chọn evidence deterministic từ candidates đã rerank.
+- Reasoning, formatter và validate schema submission.
 
 ## Pipeline
 
 ```mermaid
 flowchart TD
-    A["Question"] --> B["Query Planner Agent<br/>understanding + search queries + filters"]
+    A["Question"] --> B["Query Planner Agent<br/>search queries + filters"]
 
     B --> C["Retrieval"]
     C --> C1["Hybrid Retrieval<br/>Dense + BM25/Qdrant IDF"]
@@ -38,15 +38,12 @@ flowchart TD
     G --> H["Cross-Encoder Rerank"]
     H --> I["Final Candidates"]
 
-    I --> J["Evidence Selector Agent<br/>selection + sufficiency"]
+    I --> J["Deterministic Evidence Selection<br/>dedupe + top candidates"]
     J --> K{"Evidence sufficient?"}
     K -- "No" --> X["Stop: insufficient legal evidence"]
     K -- "Yes" --> L["Reasoner Agent"]
 
-    L --> M["Verification Agent"]
-    M --> N{"Answer supported?"}
-    N -- "No" --> L
-    N -- "Yes" --> O["Submission Formatter"]
+    L --> O["Submission Formatter"]
     O --> P["Pydantic Validator"]
     P --> Q["results.json"]
     Q --> R["results.zip"]
@@ -60,7 +57,7 @@ src/agents/     Agent và prompt nghiệp vụ
 src/chunking/   Tạo retrieval corpus
 src/common/     Config, embedding, BM25
 src/data/       Download và chuẩn hóa dữ liệu
-src/generation/ Endpoint/local LLM client
+src/generation/ Groq/endpoint/local LLM client
 src/indexing/   Graph index và Qdrant collection
 src/pipeline/   Orchestration inference
 src/retrieval/  Retrieval, fusion, expansion, rerank
@@ -102,8 +99,11 @@ QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=
 QDRANT_COLLECTION=legal_agent_rag_harrier_idf
 
-# LLM: endpoint hoặc local
-LLM_BACKEND=local
+# LLM: groq, endpoint hoặc local
+LLM_BACKEND=groq
+GROQ_API_KEY=your-groq-api-key
+GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_TIMEOUT=120
 LLM_ENDPOINT_URL=https://your-endpoint.example
 LLM_ENDPOINT_TIMEOUT=600
 LOCAL_LLM_MODEL=Qwen/Qwen3-4B-Instruct-2507
@@ -113,12 +113,12 @@ LOCAL_LLM_LOAD_IN_4BIT=true
 # Retrieval/rerank
 DENSE_MODEL=mainguyen9/vietlegal-harrier-0.6b
 COLBERT_MODEL=BAAI/bge-m3
-RETRIEVAL_TOP_K=60
+RETRIEVAL_TOP_K=40
 INITIAL_FUSION_TOP_K=40
 COLBERT_TOP_K=20
-CROSS_ENCODER_TOP_K=15
+CROSS_ENCODER_TOP_K=10
 FINAL_TOP_K=8
-RERANK_MAX_CHARS=800
+RERANK_MAX_CHARS=600
 COLBERT_BATCH_SIZE=4
 CROSS_ENCODER_BATCH_SIZE=4
 
@@ -224,6 +224,7 @@ python scripts/06_run_2000_queries.py \
 Chọn backend LLM ở CLI:
 
 ```bash
+python -m scripts.03_run_inference --llm groq
 python -m scripts.03_run_inference --llm endpoint
 python -m scripts.03_run_inference --llm local --local-model Qwen/Qwen3-4B-Instruct-2507
 ```
@@ -247,8 +248,8 @@ pytest -q
 Một số nhóm test hữu ích:
 
 ```bash
-pytest tests/test_query_planner.py tests/test_evidence_selector.py -q
-pytest tests/test_reasoner.py tests/test_verifier.py -q
+pytest tests/test_query_planner.py tests/test_formatter.py -q
+pytest tests/test_reasoner.py tests/test_formatter.py -q
 pytest tests/test_retrieval.py tests/test_inference_pipeline.py -q
 ```
 

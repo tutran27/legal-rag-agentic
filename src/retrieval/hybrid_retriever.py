@@ -127,7 +127,7 @@ def hybrid_search(
     flt=None,
     collection_name: str = settings.collection_name,
     qdrant_url: str = settings.qdrant_url,
-    top_n: int = 100,
+    top_n: int = 40,
     top_colbert: int = 50,
     top_k: int = 30,
     rerank: bool = True,
@@ -144,15 +144,17 @@ def hybrid_search(
         use_dense=use_dense,
         use_sparse=use_sparse,
     )[0]
-    if not rerank:
-        return candidates
+    
+    return candidates
+    # if not rerank:
+    #     return candidates
 
-    candidates = colbert_rerank(
-        query, candidates, colbert_model, top_k=top_colbert
-    )
-    return cross_encoder_rerank(
-        query, candidates, cross_encoder, top_k=top_k
-    )
+    # candidates = colbert_rerank(
+    #     query, candidates, colbert_model, top_k=top_colbert
+    # )
+    # return cross_encoder_rerank(
+    #     query, candidates, cross_encoder, top_k=top_k
+    # )
 
 if __name__ == "__main__":
     from src.common.embedding import load_dense_model, load_colbert_model
@@ -163,11 +165,18 @@ if __name__ == "__main__":
     dense_st = load_dense_model()
     colbert_model = load_colbert_model()
 
-    query = "Doanh nghiệp nhỏ và vừa được hỗ trợ những gì theo quy định"
+    query = "Doanh nghiệp nhỏ và vừa phải đáp ứng điều kiện nào để được hỗ trợ theo Luật Hỗ trợ doanh nghiệp nhỏ và vừa?"
     candidates = hybrid_search(
         query,
         dense_st,
         colbert_model,
         None,
     )
-    print(type(candidates[0]))
+    
+    for i, x in enumerate(candidates[0:5]):
+        print(f"---------- Top {i+1}: ----------")
+        print(x.text)
+        print(x.metadata)
+        print(x.score)
+        print(x.source)
+        print("-----------------")

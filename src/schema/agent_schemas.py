@@ -1,26 +1,13 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+
 from pydantic import BaseModel, Field
 
 
 class TestQuestion(BaseModel):
     id: int
     question: str
-
-
-class LegalUnderstanding(BaseModel):
-    domain: str | None = None
-    intent: str | None = None
-    answer_type: str | None = None
-
-    legal_entities: list[str] = Field(default_factory=list)
-    likely_docs: list[str] = Field(default_factory=list)
-    sub_questions: list[str] = Field(default_factory=list)
-    missing_facts: list[str] = Field(default_factory=list)
-
-    time_context: str | None = "hiện hành"
-    need_effective_check: bool = True
 
 
 class SearchQuery(BaseModel):
@@ -56,11 +43,11 @@ class RetrievalPlan(BaseModel):
     use_summary: bool = False
 
     top_k_exact: int = 20
-    top_k_bm25: int = 80
-    top_k_dense: int = 80
-    top_k_sparse: int = 80
-    top_k_colbert: int = 40
-    top_k_cross_encoder: int = 20
+    top_k_bm25: int = 40
+    top_k_dense: int = 40
+    top_k_sparse: int = 40
+    top_k_colbert: int = 20
+    top_k_cross_encoder: int = 10
     top_k_graph: int = 10
     top_k_summary: int = 30
 
@@ -72,7 +59,6 @@ class QueryPlan(BaseModel):
 
 
 class PlanningResult(BaseModel):
-    understanding: LegalUnderstanding
     plan: QueryPlan
 
 
@@ -102,40 +88,8 @@ class Evidence(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class SelectedEvidence(BaseModel):
-    unit_id: str
-    role: Literal["main", "supporting", "background"] = "main"
-    reason: str
-    supported_claims: list[str] = Field(default_factory=list)
-
-
-class EvidenceSelectionResult(BaseModel):
-    selected: list[SelectedEvidence]
-    rejected: list[dict[str, str]] = Field(default_factory=list)
-
-
-class SufficiencyReport(BaseModel):
-    is_sufficient: bool
-    reason: str
-    missing_evidence: list[str] = Field(default_factory=list)
-    next_queries: list[str] = Field(default_factory=list)
-
-
-class EvidenceAssessment(BaseModel):
-    selection: EvidenceSelectionResult
-    sufficiency: SufficiencyReport
-
-
 class AnswerDraft(BaseModel):
     answer: str
-
-
-class VerificationReport(BaseModel):
-    passed: bool
-    unsupported_claims: list[str] = Field(default_factory=list)
-    missing_citations: list[str] = Field(default_factory=list)
-    extra_citations: list[str] = Field(default_factory=list)
-    revision_instruction: str | None = None
 
 
 class SubmissionItem(BaseModel):
@@ -150,7 +104,6 @@ class InferenceResult(BaseModel):
     submission: SubmissionItem
     final_candidates: list[Evidence] = Field(default_factory=list)
     selected_evidence: list[Evidence] = Field(default_factory=list)
-    verification: VerificationReport
     latencies: dict[str, float] = Field(default_factory=dict)
 
 
@@ -158,7 +111,6 @@ class AgentState(BaseModel):
     id: int
     question: str
 
-    understanding: LegalUnderstanding | None = None
     search_queries: list[SearchQuery] = Field(default_factory=list)
     retrieval_filters: RetrievalFilter = Field(default_factory=RetrievalFilter)
     retrieval_plan: RetrievalPlan | None = None
@@ -168,13 +120,9 @@ class AgentState(BaseModel):
     filtered_candidates: list[Evidence] = Field(default_factory=list)
     reranked_candidates: list[Evidence] = Field(default_factory=list)
     expanded_candidates: list[Evidence] = Field(default_factory=list)
-
-    selected_evidence_ids: list[str] = Field(default_factory=list)
     selected_evidence: list[Evidence] = Field(default_factory=list)
 
-    sufficiency_report: SufficiencyReport | None = None
     answer: str | None = None
-    verification_report: VerificationReport | None = None
     submission_item: SubmissionItem | None = None
 
     retry_count: int = 0

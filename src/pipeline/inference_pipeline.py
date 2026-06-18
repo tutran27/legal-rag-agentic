@@ -1,4 +1,4 @@
-import json
+﻿import json
 import time
 from typing import Any
 
@@ -6,11 +6,9 @@ import torch
 from qdrant_client import QdrantClient, models
 from sentence_transformers import CrossEncoder
 
-from src.agents.evidence_selector import EvidenceSelectorAgent
 from src.agents.formatter import SubmissionFormatterAgent
 from src.agents.query_planner import QueryPlannerAgent
 from src.agents.reasoner import ReasonerAgent
-from src.agents.verifier import VerificationAgent
 from src.common.config import settings
 from src.common.embedding import (
     embed_dense,
@@ -608,11 +606,38 @@ class InferencePipeline:
             )
             self._print(candidate.text[:500].replace("\n", " "))
 
+    @staticmethod
+    def _select_evidence(
+        candidates: list[Evidence],
+        max_selected: int = 8,
+    ) -> list[Evidence]:
+        best_candidates: dict[tuple[str, str], Evidence] = {}
+        for candidate in candidates:
+            doc_code = (
+                candidate.doc_code
+                or candidate.metadata.get("doc_code")
+                or candidate.metadata.get("doc_id")
+            )
+            article = candidate.article or candidate.metadata.get("article")
+            key = (
+                (str(doc_code), str(article))
+                if doc_code and article
+                else (candidate.unit_id, "")
+            )
+            current = best_candidates.get(key)
+            if current is None or candidate.final_score > current.final_score:
+                best_candidates[key] = candidate
+
+        return sorted(
+            best_candidates.values(),
+            key=lambda candidate: candidate.final_score,
+            reverse=True,
+        )[:max_selected]
+
     def _complete(
         self,
         question,
         question_id,
-        understanding,
         plan,
         candidates,
         latencies,
@@ -627,86 +652,27 @@ class InferencePipeline:
         )
         self._print_results(final_candidates)
 
-        selector = EvidenceSelectorAgent(self.llm)
-        document_candidates = selector.get_selected_evidence(
-            final_candidates
-        )[:15]
         started = time.perf_counter()
-        assessment = selector.run(
-            question=question,
-            understanding=understanding,
-            candidates=document_candidates,
-        )
+        selected_evidence = self._select_evidence(final_candidates)
         self._log_latency(
-            "Evidence selection + sufficiency",
+            "Evidence selection",
             started,
             latencies,
         )
-        selected_ids = {
-            item.unit_id for item in assessment.selection.selected
-        }
-        selected_evidence = [
-            candidate
-            for candidate in document_candidates
-            if candidate.unit_id in selected_ids
-        ]
 
         started = time.perf_counter()
         reasoner = ReasonerAgent(self.llm)
         answer = reasoner.run(
             question=question,
-            understanding=understanding,
-            selection=assessment.selection,
             evidence=selected_evidence,
-            sufficiency=assessment.sufficiency,
         )
         self._log_latency("Reasoning", started, latencies)
-
-        verifier = VerificationAgent(self.llm)
-        started = time.perf_counter()
-        verification = verifier.run(
-            question=question,
-            answer=answer,
-            evidence=selected_evidence,
-        )
-        self._log_latency("Verification", started, latencies)
-
-        if not verification.passed:
-            started = time.perf_counter()
-            answer = reasoner.run(
-                question=question,
-                understanding=understanding,
-                selection=assessment.selection,
-                evidence=selected_evidence,
-                sufficiency=assessment.sufficiency,
-                revision_instruction=verification.revision_instruction,
-            )
-            self._log_latency("Answer revision", started, latencies)
-
-            started = time.perf_counter()
-            verification = verifier.run(
-                question=question,
-                answer=answer,
-                evidence=selected_evidence,
-            )
-            self._log_latency("Final verification", started, latencies)
-
-        if not verification.passed:
-            details = json.dumps(
-                verification.model_dump(),
-                ensure_ascii=False,
-            )
-            raise ValueError(
-                "Verification thất bại sau khi sửa câu trả lời: "
-                f"{details}"
-            )
 
         submission = SubmissionFormatterAgent().run(
             question_id=question_id,
             question=question,
             answer=answer,
             evidence=selected_evidence,
-            verification=verification,
         )
         validate_submission_item(submission, selected_evidence)
         latencies["Total query"] = time.perf_counter() - query_started
@@ -714,7 +680,6 @@ class InferencePipeline:
             submission=submission,
             final_candidates=final_candidates,
             selected_evidence=selected_evidence,
-            verification=verification,
             latencies=latencies,
         )
 
@@ -724,18 +689,21 @@ class InferencePipeline:
         started = time.perf_counter()
         planning = self._get_planning(question)
         self._log_latency(
-            "Understanding + query planning",
+            "Query planning",
             started,
             latencies,
         )
         self._print(
-            json.dumps(planning.plan.model_dump(), ensure_ascii=False, indent=2)
+            json.dumps(
+                planning.plan.model_dump(exclude={"retrieval"}),
+                ensure_ascii=False,
+                indent=2,
+            )
         )
         candidates = self._retrieve(question, planning.plan, latencies)
         return self._complete(
             question,
             question_id,
-            planning.understanding,
             planning.plan,
             candidates,
             latencies,
@@ -756,7 +724,7 @@ class InferencePipeline:
             started = time.perf_counter()
             try:
                 planning = self._get_planning(question)
-                latencies["Understanding + query planning"] = (
+                latencies["Query planning"] = (
                     time.perf_counter() - started
                 )
                 planned.append(
@@ -802,7 +770,6 @@ class InferencePipeline:
                     outputs[index] = self._complete(
                         question,
                         question_id,
-                        planning.understanding,
                         planning.plan,
                         candidates,
                         latencies,

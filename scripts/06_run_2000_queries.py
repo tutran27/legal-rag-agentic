@@ -4,20 +4,22 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import Protocol
 
 from pydantic import TypeAdapter, ValidationError
 
 
-os.environ.setdefault("LLM_BACKEND", "local")
+os.environ.setdefault("LLM_BACKEND", "groq")
 os.environ.setdefault("LOCAL_LLM_MODEL", "Qwen/Qwen3-4B-Instruct-2507")
 os.environ.setdefault("LOCAL_LLM_MAX_MODEL_LEN", "4096")
 os.environ.setdefault("LOCAL_LLM_LOAD_IN_4BIT", "true")
 os.environ.setdefault("COLBERT_BATCH_SIZE", "4")
 os.environ.setdefault("CROSS_ENCODER_BATCH_SIZE", "4")
-os.environ.setdefault("RERANK_MAX_CHARS", "800")
+os.environ.setdefault("RERANK_MAX_CHARS", "600")
+os.environ.setdefault("RETRIEVAL_TOP_K", "40")
 os.environ.setdefault("INITIAL_FUSION_TOP_K", "40")
 os.environ.setdefault("COLBERT_TOP_K", "20")
-os.environ.setdefault("CROSS_ENCODER_TOP_K", "15")
+os.environ.setdefault("CROSS_ENCODER_TOP_K", "10")
 os.environ.setdefault("FINAL_TOP_K", "8")
 os.environ.setdefault("PRELOAD_GRAPH", "true")
 
@@ -33,6 +35,14 @@ from src.submission.build_results import write_results
 DEFAULT_INPUT = "R2AIStage1DATA.json"
 DEFAULT_OUTPUT = "results.json"
 DEFAULT_ERRORS = "inference_errors.json"
+FALLBACK_ANSWER = "Chưa có đủ căn cứ pháp lý liên quan để trả lời câu hỏi."
+INPUT_LIST_KEYS = ("questions", "data", "items")
+
+
+class PipelineLike(Protocol):
+    def run(self, question: str, question_id: int): ...
+
+    def close(self) -> None: ...
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,7 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--errors", default=DEFAULT_ERRORS)
     parser.add_argument("--limit", type=int, default=2000)
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--llm", choices=["endpoint", "local"], default=None)
+    parser.add_argument("--llm", choices=["groq", "endpoint", "local"], default=None)
     parser.add_argument("--local-model", default=None)
     return parser.parse_args()
 
@@ -52,7 +62,10 @@ def parse_args() -> argparse.Namespace:
 def load_questions(path: str | Path, limit: int | None) -> list[TestQuestion]:
     data = json.loads(Path(path).read_text(encoding="utf-8-sig"))
     if isinstance(data, dict):
-        data = data.get("questions") or data.get("data") or data.get("items")
+        data = next(
+            (data.get(key) for key in INPUT_LIST_KEYS if data.get(key)),
+            None,
+        )
     if not isinstance(data, list):
         raise ValueError("Input phải là list hoặc dict có questions/data/items.")
     questions = TypeAdapter(list[TestQuestion]).validate_python(data)
@@ -100,15 +113,13 @@ def fallback_submission(question: TestQuestion, error: Exception) -> SubmissionI
     return SubmissionItem(
         id=question.id,
         question=question.question,
-        answer=(
-            "Chưa có đủ căn cứ pháp lý liên quan để trả lời câu hỏi."
-        ),
+        answer=FALLBACK_ANSWER,
         relevant_docs=[],
         relevant_articles=[],
     )
 
 
-def build_pipeline(args: argparse.Namespace):
+def build_pipeline(args: argparse.Namespace) -> PipelineLike:
     from src.generation.endpoint import create_llm_client
     from src.pipeline import InferencePipeline
 
@@ -116,11 +127,77 @@ def build_pipeline(args: argparse.Namespace):
     return InferencePipeline(llm=llm, verbose=False)
 
 
+def pending_questions(
+    questions: list[TestQuestion],
+    results: dict[int, SubmissionItem],
+) -> list[TestQuestion]:
+    return [item for item in questions if item.id not in results]
+
+
+def save_progress(
+    questions: list[TestQuestion],
+    results: dict[int, SubmissionItem],
+    errors: list[dict],
+    output_path: str | Path,
+    error_path: str | Path,
+) -> None:
+    write_ordered_results(questions, results, output_path)
+    write_errors(errors, error_path)
+
+
+def record_error(
+    question: TestQuestion,
+    error: Exception,
+    results: dict[int, SubmissionItem],
+    errors: list[dict],
+) -> None:
+    error_text = str(error)
+    results[question.id] = fallback_submission(question, error)
+    errors.append(
+        {
+            "id": question.id,
+            "question": question.question,
+            "error": error_text,
+        }
+    )
+    print(f"[ERROR DETAIL] id={question.id}: {error_text}")
+
+
+def log_query_done(
+    status: str,
+    index: int,
+    total_pending: int,
+    question_id: int,
+    elapsed: float,
+    done: int,
+    total_questions: int,
+) -> None:
+    print(
+        f"[{status}] {index}/{total_pending} | "
+        f"id={question_id} | {elapsed:.1f}s | done={done}/{total_questions}"
+    )
+
+
+def run_one_question(
+    pipeline: PipelineLike,
+    question: TestQuestion,
+    results: dict[int, SubmissionItem],
+    errors: list[dict],
+) -> str:
+    try:
+        output = pipeline.run(question.question, question_id=question.id)
+        results[question.id] = output.submission
+        return "OK"
+    except Exception as error:
+        record_error(question, error, results, errors)
+        return "ERROR"
+
+
 def run_batch(args: argparse.Namespace) -> None:
     questions = load_questions(args.input, args.limit)
     results = load_results(args.output) if args.resume else {}
     errors = load_errors(args.errors) if args.resume else []
-    pending = [item for item in questions if item.id not in results]
+    pending = pending_questions(questions, results)
 
     print(
         f"Tổng câu hỏi: {len(questions)} | đã có: {len(results)} | "
@@ -138,29 +215,17 @@ def run_batch(args: argparse.Namespace) -> None:
     try:
         for index, question in enumerate(pending, start=1):
             query_started = time.perf_counter()
-            status = "OK"
-            try:
-                output = pipeline.run(question.question, question_id=question.id)
-                results[question.id] = output.submission
-            except Exception as error:
-                status = "ERROR"
-                results[question.id] = fallback_submission(question, error)
-                errors.append(
-                    {
-                        "id": question.id,
-                        "question": question.question,
-                        "error": str(error),
-                    }
-                )
-
-            write_ordered_results(questions, results, args.output)
-            write_errors(errors, args.errors)
-
+            status = run_one_question(pipeline, question, results, errors)
+            save_progress(questions, results, errors, args.output, args.errors)
             elapsed = time.perf_counter() - query_started
-            done = len(results)
-            print(
-                f"[{status}] {index}/{len(pending)} | "
-                f"id={question.id} | {elapsed:.1f}s | done={done}/{len(questions)}"
+            log_query_done(
+                status=status,
+                index=index,
+                total_pending=len(pending),
+                question_id=question.id,
+                elapsed=elapsed,
+                done=len(results),
+                total_questions=len(questions),
             )
     finally:
         pipeline.close()

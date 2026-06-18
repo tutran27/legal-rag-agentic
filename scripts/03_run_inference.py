@@ -31,9 +31,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument(
         "--llm",
-        choices=["endpoint", "local"],
+        choices=["groq", "endpoint", "local"],
         default=None,
-        help="Mặc định lấy theo LLM_BACKEND, nếu không có thì dùng endpoint.",
+        help="Mặc định lấy theo LLM_BACKEND, nếu không có thì dùng groq.",
     )
     parser.add_argument(
         "--local-model",

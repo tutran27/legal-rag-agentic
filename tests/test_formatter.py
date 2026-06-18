@@ -1,11 +1,5 @@
-import pytest
-
 from src.agents.formatter import SubmissionFormatterAgent
-from src.schema.agent_schemas import (
-    AnswerDraft,
-    Evidence,
-    VerificationReport,
-)
+from src.schema.agent_schemas import AnswerDraft, Evidence
 
 
 def test_formatter_builds_unique_references():
@@ -37,7 +31,6 @@ def test_formatter_builds_unique_references():
         question="Điều kiện hỗ trợ là gì?",
         answer=AnswerDraft(answer="  Câu trả lời.  "),
         evidence=evidence,
-        verification=VerificationReport(passed=True),
     )
 
     assert result.answer == "Câu trả lời."
@@ -49,14 +42,3 @@ def test_formatter_builds_unique_references():
         "04/2017/QH14 - Điều 5",
         "80/2021/NĐ-CP - Điều 4",
     ]
-
-
-def test_formatter_rejects_unverified_answer():
-    with pytest.raises(ValueError):
-        SubmissionFormatterAgent().run(
-            question_id=1,
-            question="Câu hỏi",
-            answer=AnswerDraft(answer="Câu trả lời"),
-            evidence=[],
-            verification=VerificationReport(passed=False),
-        )

@@ -46,15 +46,15 @@ class Settings:
     qdrant_hnsw_ef = _get_int("QDRANT_HNSW_EF", 64)
     colbert_batch_size = _get_int("COLBERT_BATCH_SIZE", 16)
     cross_encoder_batch_size = _get_int("CROSS_ENCODER_BATCH_SIZE", 16)
-    retrieval_top_k = _get_int("RETRIEVAL_TOP_K", 60)
+    retrieval_top_k = _get_int("RETRIEVAL_TOP_K", 40)
     initial_fusion_top_k = _get_int("INITIAL_FUSION_TOP_K", 40)
     colbert_top_k = _get_int("COLBERT_TOP_K", 20)
-    cross_encoder_top_k = _get_int("CROSS_ENCODER_TOP_K", 15)
+    cross_encoder_top_k = _get_int("CROSS_ENCODER_TOP_K", 10)
     graph_seed_top_k = _get_int("GRAPH_SEED_TOP_K", 5)
     graph_top_k = _get_int("GRAPH_TOP_K", 10)
     context_top_k = _get_int("CONTEXT_TOP_K", 10)
     final_top_k = _get_int("FINAL_TOP_K", 8)
-    rerank_max_chars = _get_int("RERANK_MAX_CHARS", 800)
+    rerank_max_chars = _get_int("RERANK_MAX_CHARS", 600)
     graph_path = os.getenv(
         "GRAPH_PATH",
         "data/indexes/graph/legal_graph.pkl",

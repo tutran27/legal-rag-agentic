@@ -4,11 +4,6 @@ from src.agents.query_planner import QueryPlannerAgent, _tokens
 class DuplicateQueryLLM:
     def call_llm_json(self, **kwargs):
         return {
-            "understanding": {
-                "domain": "doanh nghiệp",
-                "intent": "condition_question",
-                "legal_entities": ["doanh nghiệp nhỏ và vừa"],
-            },
             "plan": {
                 "queries": [
                     {
@@ -25,18 +20,13 @@ class DuplicateQueryLLM:
         }
 
 
-class CombinedPlanningLLM:
+class PlanningLLM:
     def __init__(self):
         self.calls = 0
 
     def call_llm_json(self, **kwargs):
         self.calls += 1
         return {
-            "understanding": {
-                "domain": "doanh nghiệp",
-                "intent": "condition_question",
-                "legal_entities": ["doanh nghiệp nhỏ và vừa"],
-            },
             "plan": {
                 "queries": [
                     {
@@ -48,16 +38,20 @@ class CombinedPlanningLLM:
                         "text": "doanh nghiệp nhỏ vừa tiêu chí hỗ trợ",
                     },
                 ],
-                "filters": {"is_current": True},
+                "filters": {
+                    "domains": ["doanh nghiệp"],
+                    "is_current": True,
+                },
             },
         }
 
 
-def test_query_planner_replaces_repetitive_queries():
+def test_query_planner_returns_plan_only_and_replaces_repetitive_queries():
     question = "Doanh nghiệp nhỏ và vừa cần điều kiện nào để được hỗ trợ?"
     result = QueryPlannerAgent(DuplicateQueryLLM()).run(question)
     plan = result.plan
 
+    assert not hasattr(result, "understanding")
     assert [query.query_type for query in plan.queries] == [
         "original",
         "legal_rewrite",
@@ -69,27 +63,22 @@ def test_query_planner_replaces_repetitive_queries():
     assert plan.queries[1].text != plan.queries[2].text
 
 
-def test_combined_planning_uses_one_llm_call():
-    llm = CombinedPlanningLLM()
+def test_query_planner_uses_one_llm_call():
+    llm = PlanningLLM()
 
     result = QueryPlannerAgent(llm).run(
         "Doanh nghiệp nhỏ và vừa được hỗ trợ khi nào?"
     )
 
     assert llm.calls == 1
-    assert result.understanding.intent == "condition_question"
     assert len(result.plan.queries) == 3
+    assert result.plan.filters.domains == ["doanh nghiệp"]
 
 
-def test_query_planner_normalizes_taxonomy_to_lowercase():
+def test_query_planner_normalizes_taxonomy_to_vietnamese_text():
     class TaxonomyLLM:
         def call_llm_json(self, **kwargs):
             return {
-                "understanding": {
-                    "domain": "Doanh nghiệp",
-                    "intent": "condition_question",
-                    "legal_entities": ["doanh nghiệp nhỏ và vừa"],
-                },
                 "plan": {
                     "queries": [
                         {
@@ -102,8 +91,9 @@ def test_query_planner_normalizes_taxonomy_to_lowercase():
                         },
                     ],
                     "filters": {
-                        "domains": ["Doanh nghiệp"],
-                        "sectors": ["Kế hoạch và Đầu tư"],
+                        "doc_types": ["nghi-dinh"],
+                        "domains": ["Doanh-Nghiep"],
+                        "sectors": ["ke-hoach-va-dau-tu"],
                         "is_current": True,
                     },
                 },
@@ -111,40 +101,7 @@ def test_query_planner_normalizes_taxonomy_to_lowercase():
 
     result = QueryPlannerAgent(TaxonomyLLM()).run("Câu hỏi")
 
-    assert result.plan.filters.domains == ["doanh nghiệp"]
-    assert result.plan.filters.sectors == ["kế hoạch và đầu tư"]
-
-
-def test_query_planner_normalizes_taxonomy_slug_to_accented_text():
-    class SlugTaxonomyLLM:
-        def call_llm_json(self, **kwargs):
-            return {
-                "understanding": {
-                    "domain": "doanh-nghiep",
-                    "intent": "condition_question",
-                    "legal_entities": ["doanh nghiệp nhỏ và vừa"],
-                },
-                "plan": {
-                    "queries": [
-                        {
-                            "query_type": "legal_rewrite",
-                            "text": "Điều kiện doanh nghiệp nhỏ và vừa được hỗ trợ",
-                        },
-                        {
-                            "query_type": "keyword",
-                            "text": "doanh nghiệp nhỏ vừa tiêu chí hỗ trợ",
-                        },
-                    ],
-                    "filters": {
-                        "domains": ["doanh-nghiep"],
-                        "sectors": ["ke-hoach-va-dau-tu"],
-                        "is_current": True,
-                    },
-                },
-            }
-
-    result = QueryPlannerAgent(SlugTaxonomyLLM()).run("Câu hỏi")
-
+    assert result.plan.filters.doc_types == ["nghị định"]
     assert result.plan.filters.domains == ["doanh nghiệp"]
     assert result.plan.filters.sectors == ["kế hoạch và đầu tư"]
 
@@ -153,11 +110,6 @@ def test_query_planner_replaces_unaccented_queries():
     class UnaccentedLLM:
         def call_llm_json(self, **kwargs):
             return {
-                "understanding": {
-                    "domain": "doanh nghiep",
-                    "intent": "condition_question",
-                    "legal_entities": ["doanh nghiep nho va vua"],
-                },
                 "plan": {
                     "queries": [
                         {

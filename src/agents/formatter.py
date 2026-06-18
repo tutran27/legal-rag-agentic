@@ -1,9 +1,4 @@
-from src.schema.agent_schemas import (
-    AnswerDraft,
-    Evidence,
-    SubmissionItem,
-    VerificationReport,
-)
+from src.schema.agent_schemas import AnswerDraft, Evidence, SubmissionItem
 
 
 class SubmissionFormatterAgent:
@@ -13,11 +8,7 @@ class SubmissionFormatterAgent:
         question: str,
         answer: AnswerDraft,
         evidence: list[Evidence],
-        verification: VerificationReport,
     ) -> SubmissionItem:
-        if not verification.passed:
-            raise ValueError("Câu trả lời chưa vượt qua bước verification.")
-
         relevant_docs = []
         relevant_articles = []
 

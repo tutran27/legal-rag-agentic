@@ -3,16 +3,10 @@ from src.pipeline.inference_pipeline import InferencePipeline
 from src.schema.agent_schemas import (
     AnswerDraft,
     Evidence,
-    EvidenceAssessment,
-    EvidenceSelectionResult,
-    LegalUnderstanding,
     PlanningResult,
     QueryPlan,
     RetrievalPlan,
     SearchQuery,
-    SelectedEvidence,
-    SufficiencyReport,
-    VerificationReport,
 )
 
 
@@ -24,7 +18,6 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
         metadata={"doc_code": "04/2017/QH14", "article": "Điều 5"},
     )
     planning = PlanningResult(
-        understanding=LegalUnderstanding(intent="tra cứu"),
         plan=QueryPlan(
             queries=[
                 SearchQuery(
@@ -34,37 +27,12 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
             ]
         ),
     )
-    assessment = EvidenceAssessment(
-        selection=EvidenceSelectionResult(
-            selected=[
-                SelectedEvidence(
-                    unit_id=evidence.unit_id,
-                    reason="Liên quan trực tiếp",
-                )
-            ]
-        ),
-        sufficiency=SufficiencyReport(
-            is_sufficient=True,
-            reason="Đủ căn cứ",
-        ),
-    )
-
     class FakePlanner:
         def __init__(self, llm):
             pass
 
         def run(self, question):
             return planning
-
-    class FakeSelector:
-        def __init__(self, llm):
-            pass
-
-        def get_selected_evidence(self, candidates):
-            return candidates
-
-        def run(self, **kwargs):
-            return assessment
 
     class FakeReasoner:
         def __init__(self, llm):
@@ -73,17 +41,8 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
         def run(self, **kwargs):
             return AnswerDraft(answer="Doanh nghiệp đáp ứng điều kiện hỗ trợ.")
 
-    class FakeVerifier:
-        def __init__(self, llm):
-            pass
-
-        def run(self, **kwargs):
-            return VerificationReport(passed=True)
-
     monkeypatch.setattr(pipeline_module, "QueryPlannerAgent", FakePlanner)
-    monkeypatch.setattr(pipeline_module, "EvidenceSelectorAgent", FakeSelector)
     monkeypatch.setattr(pipeline_module, "ReasonerAgent", FakeReasoner)
-    monkeypatch.setattr(pipeline_module, "VerificationAgent", FakeVerifier)
 
     pipeline = InferencePipeline(
         llm=object(),
@@ -114,7 +73,6 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
     assert result.submission.id == 7
     assert result.submission.relevant_docs == ["04/2017/QH14"]
     assert result.selected_evidence == [evidence]
-    assert result.verification.passed is True
 
 
 def test_expansion_gates_graph_and_context():
@@ -172,7 +130,6 @@ def test_retrieve_passes_shared_client_to_exact(monkeypatch):
 
 def test_run_many_keeps_order_and_returns_item_error(monkeypatch):
     planning = PlanningResult(
-        understanding=LegalUnderstanding(intent="lookup"),
         plan=QueryPlan(
             queries=[SearchQuery(query_type="original", text="Question")]
         ),

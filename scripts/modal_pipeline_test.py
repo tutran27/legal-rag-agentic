@@ -75,7 +75,7 @@ image = (
 def run_one_query(
     query: str = DEFAULT_QUERY,
     question_id: int = 1,
-    llm_backend: str = "local",
+    llm_backend: str = "groq",
     local_model: str = "Qwen/Qwen3-4B-Instruct-2507",
     colbert_batch_size: int = 64,
     cross_encoder_batch_size: int = 64,
@@ -92,11 +92,12 @@ def run_one_query(
     os.environ.setdefault("LOCAL_LLM_MAX_MODEL_LEN", "8192")
     os.environ.setdefault("COLBERT_BATCH_SIZE", str(colbert_batch_size))
     os.environ.setdefault("CROSS_ENCODER_BATCH_SIZE", str(cross_encoder_batch_size))
-    os.environ.setdefault("RETRIEVAL_TOP_K", "80")
-    os.environ.setdefault("INITIAL_FUSION_TOP_K", "80")
-    os.environ.setdefault("COLBERT_TOP_K", "40")
-    os.environ.setdefault("CROSS_ENCODER_TOP_K", "20")
-    os.environ.setdefault("FINAL_TOP_K", "20")
+    os.environ.setdefault("RERANK_MAX_CHARS", "600")
+    os.environ.setdefault("RETRIEVAL_TOP_K", "40")
+    os.environ.setdefault("INITIAL_FUSION_TOP_K", "40")
+    os.environ.setdefault("COLBERT_TOP_K", "20")
+    os.environ.setdefault("CROSS_ENCODER_TOP_K", "10")
+    os.environ.setdefault("FINAL_TOP_K", "8")
     os.environ.setdefault("QDRANT_TIMEOUT", "120")
     os.environ.setdefault("QDRANT_HNSW_EF", "64")
     os.environ.setdefault("HF_DOWNLOAD_WORKERS", "16")
@@ -177,7 +178,7 @@ def main(
     query: str = DEFAULT_QUERY,
     question_id: int = 1,
     detach: bool = False,
-    llm_backend: str = "local",
+    llm_backend: str = "groq",
     local_model: str = "Qwen/Qwen3-4B-Instruct-2507",
     colbert_batch_size: int = 64,
     cross_encoder_batch_size: int = 64,
