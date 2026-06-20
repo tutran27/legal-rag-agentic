@@ -15,19 +15,24 @@ def make_evidence():
             text="Nội dung",
             metadata={
                 "doc_code": "04/2017/QH14",
+                "doc_title_submission": "Luật 04/2017/QH14 Hỗ trợ doanh nghiệp nhỏ và vừa",
                 "article": "Điều 5",
             },
         )
     ]
 
 
-def test_validator_accepts_selected_evidence_citations():
+def test_validator_accepts_final_candidate_citations():
     item = SubmissionItem(
         id=1,
         question="Câu hỏi",
         answer="Câu trả lời",
-        relevant_docs=["04/2017/QH14"],
-        relevant_articles=["04/2017/QH14 - Điều 5"],
+        relevant_docs=[
+            "04/2017/QH14|Luật 04/2017/QH14 Hỗ trợ doanh nghiệp nhỏ và vừa"
+        ],
+        relevant_articles=[
+            "04/2017/QH14|Luật 04/2017/QH14 Hỗ trợ doanh nghiệp nhỏ và vừa|Điều 5"
+        ],
     )
 
     validate_submission_item(item, make_evidence())

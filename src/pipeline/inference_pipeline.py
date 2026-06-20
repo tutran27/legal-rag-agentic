@@ -6,14 +6,13 @@ import torch
 from qdrant_client import QdrantClient, models
 from sentence_transformers import CrossEncoder
 
-from src.agents.evidence_selector import EvidenceSelectorAgent
 from src.agents.formatter import SubmissionFormatterAgent
 from src.agents.query_planner import QueryPlannerAgent
 from src.agents.reasoner import ReasonerAgent
-from src.agents.verifier import VerificationAgent
 from src.common.config import settings
 from src.common.embedding import (
     embed_dense,
+    get_torch_device,
     load_colbert_model,
     load_dense_model,
 )
@@ -34,7 +33,7 @@ from src.schema.agent_schemas import (
 from src.submission.validate_results import validate_submission_item
 
 
-CROSS_ENCODER_MODEL = "Qwen/Qwen3-Reranker-0.6B"
+CROSS_ENCODER_MODEL = settings.cross_encoder_model
 GRAPH_TERMS = {
     "sửa đổi",
     "bổ sung",
@@ -54,6 +53,8 @@ def build_qdrant_filter(
     fields = (
         ("doc_code", filters.doc_codes),
         ("doc_type", filters.doc_types),
+        ("domain", filters.domains),
+        ("sector", filters.sectors),
     )
     for key, values in fields:
         if values:
@@ -84,13 +85,25 @@ class InferencePipeline:
         qdrant_client: QdrantClient | None = None,
         preload_graph_index: bool = settings.preload_graph,
         verbose: bool = True,
+        enable_colbert: bool = settings.enable_colbert,
+        enable_cross_encoder: bool = settings.enable_cross_encoder,
     ) -> None:
         self.verbose = verbose
+        self.enable_colbert = enable_colbert
+        self.enable_cross_encoder = enable_cross_encoder
         started = time.perf_counter()
         self.llm = llm or create_llm_client()
         self.dense_model = dense_model or load_dense_model()
-        self.colbert_model = colbert_model or load_colbert_model()
-        self.cross_encoder = cross_encoder or self._load_cross_encoder()
+        self.colbert_model = (
+            (colbert_model or load_colbert_model())
+            if enable_colbert
+            else None
+        )
+        self.cross_encoder = (
+            (cross_encoder or self._load_cross_encoder())
+            if enable_cross_encoder
+            else None
+        )
         self.qdrant_client = qdrant_client or QdrantClient(
             url=settings.qdrant_url,
             api_key=settings.qdrant_api_key,
@@ -107,11 +120,11 @@ class InferencePipeline:
 
     @staticmethod
     def _load_cross_encoder() -> CrossEncoder:
-        use_cuda = torch.cuda.is_available()
+        device = get_torch_device()
         return CrossEncoder(
             CROSS_ENCODER_MODEL,
-            device="cuda" if use_cuda else "cpu",
-            model_kwargs={"torch_dtype": torch.float16} if use_cuda else None,
+            device=device,
+            model_kwargs={"torch_dtype": torch.float16} if device == "cuda" else None,
         )
 
     def _print(self, message: str = "") -> None:
@@ -341,7 +354,6 @@ class InferencePipeline:
         query_weights = {
             "original": 1.0,
             "legal_rewrite": 0.8,
-            "keyword": 0.6,
         }
         weights = [
             query_weights.get(search_query.query_type, 0.7)
@@ -445,7 +457,6 @@ class InferencePipeline:
             query_weights = {
                 "original": 1.0,
                 "legal_rewrite": 0.8,
-                "keyword": 0.6,
             }
             weights = [
                 query_weights.get(search_query.query_type, 0.7)
@@ -550,7 +561,7 @@ class InferencePipeline:
         return expanded
 
     def _rerank(self, question, retrieval_plan, candidates, latencies):
-        if retrieval_plan.use_colbert:
+        if retrieval_plan.use_colbert and self.enable_colbert:
             started = time.perf_counter()
             candidates = colbert_rerank(
                 question,
@@ -565,7 +576,7 @@ class InferencePipeline:
         else:
             candidates = candidates[:settings.colbert_top_k]
 
-        if retrieval_plan.use_cross_encoder:
+        if retrieval_plan.use_cross_encoder and self.enable_cross_encoder:
             started = time.perf_counter()
             candidates = cross_encoder_rerank(
                 question,
@@ -627,94 +638,26 @@ class InferencePipeline:
         )
         self._print_results(final_candidates)
 
-        selector = EvidenceSelectorAgent(self.llm)
-        document_candidates = selector.get_selected_evidence(
-            final_candidates
-        )[:15]
-        started = time.perf_counter()
-        assessment = selector.run(
-            question=question,
-            understanding=understanding,
-            candidates=document_candidates,
-        )
-        self._log_latency(
-            "Evidence selection + sufficiency",
-            started,
-            latencies,
-        )
-        selected_ids = {
-            item.unit_id for item in assessment.selection.selected
-        }
-        selected_evidence = [
-            candidate
-            for candidate in document_candidates
-            if candidate.unit_id in selected_ids
-        ]
-
         started = time.perf_counter()
         reasoner = ReasonerAgent(self.llm)
         answer = reasoner.run(
             question=question,
             understanding=understanding,
-            selection=assessment.selection,
-            evidence=selected_evidence,
-            sufficiency=assessment.sufficiency,
+            evidence=final_candidates,
         )
         self._log_latency("Reasoning", started, latencies)
-
-        verifier = VerificationAgent(self.llm)
-        started = time.perf_counter()
-        verification = verifier.run(
-            question=question,
-            answer=answer,
-            evidence=selected_evidence,
-        )
-        self._log_latency("Verification", started, latencies)
-
-        if not verification.passed:
-            started = time.perf_counter()
-            answer = reasoner.run(
-                question=question,
-                understanding=understanding,
-                selection=assessment.selection,
-                evidence=selected_evidence,
-                sufficiency=assessment.sufficiency,
-                revision_instruction=verification.revision_instruction,
-            )
-            self._log_latency("Answer revision", started, latencies)
-
-            started = time.perf_counter()
-            verification = verifier.run(
-                question=question,
-                answer=answer,
-                evidence=selected_evidence,
-            )
-            self._log_latency("Final verification", started, latencies)
-
-        if not verification.passed:
-            details = json.dumps(
-                verification.model_dump(),
-                ensure_ascii=False,
-            )
-            raise ValueError(
-                "Verification thất bại sau khi sửa câu trả lời: "
-                f"{details}"
-            )
 
         submission = SubmissionFormatterAgent().run(
             question_id=question_id,
             question=question,
             answer=answer,
-            evidence=selected_evidence,
-            verification=verification,
+            evidence=final_candidates,
         )
-        validate_submission_item(submission, selected_evidence)
+        validate_submission_item(submission, final_candidates)
         latencies["Total query"] = time.perf_counter() - query_started
         return InferenceResult(
             submission=submission,
             final_candidates=final_candidates,
-            selected_evidence=selected_evidence,
-            verification=verification,
             latencies=latencies,
         )
 
@@ -724,7 +667,7 @@ class InferencePipeline:
         started = time.perf_counter()
         planning = self._get_planning(question)
         self._log_latency(
-            "Understanding + query planning",
+            "Query planning",
             started,
             latencies,
         )
@@ -756,7 +699,7 @@ class InferencePipeline:
             started = time.perf_counter()
             try:
                 planning = self._get_planning(question)
-                latencies["Understanding + query planning"] = (
+                latencies["Query planning"] = (
                     time.perf_counter() - started
                 )
                 planned.append(

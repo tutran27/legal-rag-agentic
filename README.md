@@ -13,8 +13,7 @@ Pipeline hiện tại kết hợp:
 - Exact search theo mã văn bản/điều nếu câu hỏi có định danh rõ.
 - Graph/context expansion để bổ sung văn bản hoặc đơn vị pháp lý liên quan.
 - ColBERT và cross-encoder rerank.
-- Evidence selection + sufficiency trong một LLM call.
-- Reasoning, verification, formatter và validate schema submission.
+- Reasoning, formatter và validate schema submission.
 
 ## Pipeline
 
@@ -38,15 +37,9 @@ flowchart TD
     G --> H["Cross-Encoder Rerank"]
     H --> I["Final Candidates"]
 
-    I --> J["Evidence Selector Agent<br/>selection + sufficiency"]
-    J --> K{"Evidence sufficient?"}
-    K -- "No" --> X["Stop: insufficient legal evidence"]
-    K -- "Yes" --> L["Reasoner Agent"]
+    I --> L["Reasoner Agent"]
 
-    L --> M["Verification Agent"]
-    M --> N{"Answer supported?"}
-    N -- "No" --> L
-    N -- "Yes" --> O["Submission Formatter"]
+    L --> O["Submission Formatter"]
     O --> P["Pydantic Validator"]
     P --> Q["results.json"]
     Q --> R["results.zip"]
@@ -102,10 +95,14 @@ QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=
 QDRANT_COLLECTION=legal_agent_rag_harrier_idf
 
-# LLM: endpoint hoặc local
-LLM_BACKEND=local
-LLM_ENDPOINT_URL=https://your-endpoint.example
+# LLM mặc định: Qwen 2.5 14B qua endpoint OpenAI-compatible
+LLM_BACKEND=endpoint
+QWEN_API_KEY=your-qwen-api-key
+LLM_ENDPOINT_URL=https://onthi206--qwen2-5-14b-vllm-serve.modal.run
+LLM_ENDPOINT_MODEL=qwen2.5-14b-instruct
 LLM_ENDPOINT_TIMEOUT=600
+
+# Chỉ dùng khi LLM_BACKEND=local
 LOCAL_LLM_MODEL=Qwen/Qwen3-4B-Instruct-2507
 LOCAL_LLM_MAX_MODEL_LEN=4096
 LOCAL_LLM_LOAD_IN_4BIT=true
@@ -221,6 +218,18 @@ python scripts/06_run_2000_queries.py \
   --resume
 ```
 
+Chạy lại riêng các ID còn trong `inference_errors.json`. Kết quả thành công được
+chèn vào `results.json` theo thứ tự của file input và được xóa khỏi file lỗi:
+
+```bash
+python -m scripts.07_retry_failed_queries \
+  --input R2AIStage1DATA.json \
+  --output results.json \
+  --errors inference_errors.json
+```
+
+Thêm `--limit 10` nếu chỉ muốn thử lại 10 lỗi đầu tiên.
+
 Chọn backend LLM ở CLI:
 
 ```bash
@@ -247,8 +256,8 @@ pytest -q
 Một số nhóm test hữu ích:
 
 ```bash
-pytest tests/test_query_planner.py tests/test_evidence_selector.py -q
-pytest tests/test_reasoner.py tests/test_verifier.py -q
+pytest tests/test_query_planner.py tests/test_reasoner.py -q
+pytest tests/test_reasoner.py tests/test_formatter.py -q
 pytest tests/test_retrieval.py tests/test_inference_pipeline.py -q
 ```
 

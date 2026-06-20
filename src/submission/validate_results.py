@@ -24,22 +24,25 @@ def validate_submission_item(
     valid_articles = set()
     for source in evidence:
         doc_code = source.doc_code or source.metadata.get("doc_code")
+        doc_title = (
+            source.doc_title_submission
+            or source.metadata.get("doc_title_submission")
+            or source.metadata.get("doc_name_for_submission")
+        )
         article = source.article or source.metadata.get("article")
-        if doc_code:
-            valid_docs.add(str(doc_code))
+        if not doc_code or not doc_title:
+            continue
+
+        doc_citation = f"{doc_code}|{doc_title}"
+        valid_docs.add(doc_citation)
         if article:
-            citation = (
-                f"{doc_code} - {article}"
-                if doc_code
-                else str(article)
-            )
-            valid_articles.add(citation)
+            valid_articles.add(f"{doc_citation}|{article}")
 
     invalid_docs = set(item.relevant_docs) - valid_docs
     invalid_articles = set(item.relevant_articles) - valid_articles
     if invalid_docs or invalid_articles:
         raise ValueError(
-            "Citation không thuộc selected evidence: "
+            "Citation không thuộc final candidates: "
             f"docs={sorted(invalid_docs)}, "
             f"articles={sorted(invalid_articles)}"
         )

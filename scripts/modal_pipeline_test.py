@@ -119,8 +119,8 @@ def run_one_query(
 
     import torch
 
-    from src.generation.endpoint import create_llm_client
     from src.pipeline import InferencePipeline
+    from src.generation.endpoint import create_llm_client
 
     print(
         json.dumps(
@@ -157,14 +157,14 @@ def run_one_query(
         "total_wall_time": total,
         "latencies": result.latencies,
         "submission": result.submission.model_dump(),
-        "selected_evidence": [
+        "final_candidates": [
             {
                 "unit_id": item.unit_id,
                 "doc_code": item.doc_code or item.metadata.get("doc_code"),
                 "article": item.article or item.metadata.get("article"),
                 "final_score": item.final_score,
             }
-            for item in result.selected_evidence
+            for item in result.final_candidates
         ],
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))

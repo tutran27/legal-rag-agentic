@@ -1,23 +1,43 @@
 import json
 import os
 import re
+import time
 from typing import Any
 
 import requests
+import torch
 from dotenv import load_dotenv
 
 
 load_dotenv()
 
 DEFAULT_ENDPOINT_URL = (
-    "https://dinhtu7cfc--qwen2-5-14b-instruct-api-api.modal.run"
+    "https://onthi206--qwen2-5-14b-vllm-serve.modal.run"
 )
+DEFAULT_ENDPOINT_MODEL = "qwen2.5-14b-instruct"
 DEFAULT_SYSTEM_PROMPT = (
     "Bạn là trợ lý AI chuyên nghiệp. Trả lời ngắn gọn, chính xác và "
     "đúng yêu cầu."
 )
 DEFAULT_LOCAL_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 JSON_RETRY_ATTEMPTS = 2
+DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
+DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+
+
+def _log_retry(
+    stage: str,
+    reason: str,
+    attempt: int,
+    max_attempts: int,
+    delay: float | None = None,
+) -> None:
+    delay_text = f" delay={delay:.1f}s" if delay is not None else ""
+    print(
+        f"[RETRY] stage={stage} reason={reason} "
+        f"attempt={attempt}/{max_attempts}{delay_text}",
+        flush=True,
+    )
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -55,6 +75,8 @@ class EndpointLLMClient:
     def __init__(
         self,
         endpoint_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
         timeout: int | None = None,
         session: requests.Session | None = None,
     ) -> None:
@@ -63,16 +85,23 @@ class EndpointLLMClient:
             or os.getenv("LLM_ENDPOINT_URL")
             or DEFAULT_ENDPOINT_URL
         ).rstrip("/")
+        self.api_key = api_key or os.getenv("QWEN_API_KEY")
+        if not self.api_key:
+            raise ValueError("Thiếu QWEN_API_KEY để dùng LLM_BACKEND=endpoint.")
+        self.model = (
+            model
+            or os.getenv("LLM_ENDPOINT_MODEL")
+            or DEFAULT_ENDPOINT_MODEL
+        )
         self.timeout = timeout or int(os.getenv("LLM_ENDPOINT_TIMEOUT", "600"))
         self.session = session or requests.Session()
 
     def health(self) -> dict[str, Any]:
-        response = self.session.get(
-            f"{self.endpoint_url}/health",
-            timeout=self.timeout,
-        )
-        response.raise_for_status()
-        return response.json()
+        return {
+            "backend": "endpoint",
+            "model": self.model,
+            "url": self.endpoint_url,
+        }
 
     def generate(
         self,
@@ -86,11 +115,21 @@ class EndpointLLMClient:
     ) -> str:
         token_limit = max_tokens or max_new_tokens or 1536
         response = self.session.post(
-            f"{self.endpoint_url}/generate",
+            f"{self.endpoint_url}/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
             json={
-                "query": query,
-                "prompt": system_prompt or DEFAULT_SYSTEM_PROMPT,
-                "max_new_tokens": token_limit,
+                "model": self.model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": system_prompt or DEFAULT_SYSTEM_PROMPT,
+                    },
+                    {"role": "user", "content": query},
+                ],
+                "max_tokens": token_limit,
                 "temperature": temperature,
                 "top_p": top_p,
             },
@@ -98,11 +137,14 @@ class EndpointLLMClient:
         )
         response.raise_for_status()
         data = response.json()
-        content = data.get("response")
-        if not isinstance(content, str):
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as error:
             raise ValueError(
-                "Endpoint không trả về trường 'response' dạng chuỗi."
-            )
+                "Endpoint không trả về message content hợp lệ."
+            ) from error
+        if not isinstance(content, str):
+            raise ValueError("Endpoint message content không phải chuỗi.")
         return content
 
     @staticmethod
@@ -132,6 +174,7 @@ class EndpointLLMClient:
         system_prompt: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        retry_stage = str(kwargs.pop("retry_stage", "llm"))
         last_error: Exception | None = None
         output = ""
         current_query = query
@@ -148,10 +191,143 @@ class EndpointLLMClient:
                 last_error = error
                 if attempt >= JSON_RETRY_ATTEMPTS:
                     break
+                _log_retry(
+                    retry_stage,
+                    "invalid_json",
+                    attempt + 1,
+                    JSON_RETRY_ATTEMPTS,
+                )
                 current_query = _json_repair_query(query, output)
                 current_prompt = _json_repair_prompt(system_prompt)
         raise ValueError(
             "LLM trả về JSON không hợp lệ sau "
+            f"{JSON_RETRY_ATTEMPTS + 1} lần thử:\n{output}"
+        ) from last_error
+
+
+class GroqLLMClient:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout: int | None = None,
+        session: requests.Session | None = None,
+    ) -> None:
+        self.api_key = api_key or os.getenv("GROQ_API_KEY")
+        if not self.api_key:
+            raise ValueError("Thiếu GROQ_API_KEY để dùng LLM_BACKEND=groq.")
+        self.model = model or os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL
+        self.base_url = (
+            base_url or os.getenv("GROQ_BASE_URL") or DEFAULT_GROQ_BASE_URL
+        ).rstrip("/")
+        self.timeout = timeout or int(os.getenv("GROQ_TIMEOUT", "120"))
+        self.retry_attempts = int(os.getenv("GROQ_RETRY_ATTEMPTS", "4"))
+        self.retry_delay = float(os.getenv("GROQ_RETRY_DELAY", "5"))
+        self.session = session or requests.Session()
+
+    def health(self) -> dict[str, Any]:
+        return {"backend": "groq", "model": self.model}
+
+    def generate(
+        self,
+        query: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.0,
+        max_new_tokens: int | None = None,
+        max_tokens: int | None = None,
+        top_p: float = 0.9,
+        retry_stage: str = "llm",
+        **_: Any,
+    ) -> str:
+        token_limit = max_tokens or max_new_tokens or 1536
+        response = None
+        for attempt in range(self.retry_attempts + 1):
+            response = self.session.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": system_prompt or DEFAULT_SYSTEM_PROMPT,
+                        },
+                        {"role": "user", "content": query},
+                    ],
+                    "max_tokens": token_limit,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                },
+                timeout=self.timeout,
+            )
+            if response.status_code not in {429, 500, 502, 503, 504}:
+                break
+            if attempt >= self.retry_attempts:
+                break
+            retry_after = response.headers.get("Retry-After")
+            delay = (
+                float(retry_after)
+                if retry_after and retry_after.replace(".", "", 1).isdigit()
+                else self.retry_delay * (2**attempt)
+            )
+            _log_retry(
+                retry_stage,
+                f"http_{response.status_code}",
+                attempt + 1,
+                self.retry_attempts,
+                delay,
+            )
+            time.sleep(delay)
+        if response is None:
+            raise RuntimeError("Không nhận được phản hồi từ Groq.")
+        response.raise_for_status()
+        data = response.json()
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ValueError("Groq không trả về message content hợp lệ.") from error
+        if not isinstance(content, str):
+            raise ValueError("Groq message content không phải chuỗi.")
+        return content
+
+    def call_llm_json(
+        self,
+        query: str,
+        system_prompt: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        retry_stage = str(kwargs.pop("retry_stage", "llm"))
+        last_error: Exception | None = None
+        output = ""
+        current_query = query
+        current_prompt = system_prompt
+        for attempt in range(JSON_RETRY_ATTEMPTS + 1):
+            output = self.generate(
+                query=current_query,
+                system_prompt=current_prompt,
+                retry_stage=retry_stage,
+                **kwargs,
+            )
+            try:
+                return EndpointLLMClient.extract_json_object(output)
+            except (json.JSONDecodeError, ValueError) as error:
+                last_error = error
+                if attempt >= JSON_RETRY_ATTEMPTS:
+                    break
+                _log_retry(
+                    retry_stage,
+                    "invalid_json",
+                    attempt + 1,
+                    JSON_RETRY_ATTEMPTS,
+                )
+                current_query = _json_repair_query(query, output)
+                current_prompt = _json_repair_prompt(system_prompt)
+        raise ValueError(
+            "Groq trả về JSON không hợp lệ sau "
             f"{JSON_RETRY_ATTEMPTS + 1} lần thử:\n{output}"
         ) from last_error
 
@@ -270,6 +446,7 @@ class LocalQwenLLMClient:
         system_prompt: str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
+        retry_stage = str(kwargs.pop("retry_stage", "llm"))
         last_error: Exception | None = None
         output = ""
         current_query = query
@@ -278,6 +455,7 @@ class LocalQwenLLMClient:
             output = self.generate(
                 query=current_query,
                 system_prompt=current_prompt,
+                retry_stage=retry_stage,
                 **kwargs,
             )
             try:
@@ -286,6 +464,12 @@ class LocalQwenLLMClient:
                 last_error = error
                 if attempt >= JSON_RETRY_ATTEMPTS:
                     break
+                _log_retry(
+                    retry_stage,
+                    "invalid_json",
+                    attempt + 1,
+                    JSON_RETRY_ATTEMPTS,
+                )
                 current_query = _json_repair_query(query, output)
                 current_prompt = _json_repair_prompt(system_prompt)
         raise ValueError(
@@ -297,13 +481,15 @@ class LocalQwenLLMClient:
 def create_llm_client(
     backend: str | None = None,
     local_model: str | None = None,
-) -> EndpointLLMClient | LocalQwenLLMClient:
+) -> EndpointLLMClient | GroqLLMClient | LocalQwenLLMClient:
     selected = (backend or os.getenv("LLM_BACKEND") or "endpoint").lower()
+    if selected == "groq":
+        return GroqLLMClient()
     if selected == "endpoint":
         return EndpointLLMClient()
     if selected == "local":
         return LocalQwenLLMClient(model_name=local_model)
-    raise ValueError("LLM_BACKEND chỉ hỗ trợ 'endpoint' hoặc 'local'.")
+    raise ValueError("LLM_BACKEND chỉ hỗ trợ 'groq', 'endpoint' hoặc 'local'.")
 
 
 if __name__ == "__main__":

@@ -8,8 +8,8 @@ from pydantic import ValidationError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.generation.endpoint import create_llm_client
 from src.pipeline import InferencePipeline
+from src.generation.endpoint import create_llm_client
 from src.schema.agent_schemas import InferenceResult, SubmissionItem, TestQuestion
 from src.submission.build_results import write_results
 
@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument(
         "--llm",
-        choices=["endpoint", "local"],
+        choices=["groq", "endpoint", "local"],
         default=None,
         help="Mặc định lấy theo LLM_BACKEND, nếu không có thì dùng endpoint.",
     )

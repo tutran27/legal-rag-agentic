@@ -3,16 +3,11 @@ from src.pipeline.inference_pipeline import InferencePipeline
 from src.schema.agent_schemas import (
     AnswerDraft,
     Evidence,
-    EvidenceAssessment,
-    EvidenceSelectionResult,
     LegalUnderstanding,
     PlanningResult,
     QueryPlan,
     RetrievalPlan,
     SearchQuery,
-    SelectedEvidence,
-    SufficiencyReport,
-    VerificationReport,
 )
 
 
@@ -21,7 +16,11 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
         unit_id="doc-1::article-1",
         text="Nội dung hỗ trợ doanh nghiệp.",
         final_score=1.0,
-        metadata={"doc_code": "04/2017/QH14", "article": "Điều 5"},
+        metadata={
+            "doc_code": "04/2017/QH14",
+            "doc_title_submission": "Luật 04/2017/QH14 Hỗ trợ doanh nghiệp nhỏ và vừa",
+            "article": "Điều 5",
+        },
     )
     planning = PlanningResult(
         understanding=LegalUnderstanding(intent="tra cứu"),
@@ -34,37 +33,12 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
             ]
         ),
     )
-    assessment = EvidenceAssessment(
-        selection=EvidenceSelectionResult(
-            selected=[
-                SelectedEvidence(
-                    unit_id=evidence.unit_id,
-                    reason="Liên quan trực tiếp",
-                )
-            ]
-        ),
-        sufficiency=SufficiencyReport(
-            is_sufficient=True,
-            reason="Đủ căn cứ",
-        ),
-    )
-
     class FakePlanner:
         def __init__(self, llm):
             pass
 
         def run(self, question):
             return planning
-
-    class FakeSelector:
-        def __init__(self, llm):
-            pass
-
-        def get_selected_evidence(self, candidates):
-            return candidates
-
-        def run(self, **kwargs):
-            return assessment
 
     class FakeReasoner:
         def __init__(self, llm):
@@ -73,17 +47,8 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
         def run(self, **kwargs):
             return AnswerDraft(answer="Doanh nghiệp đáp ứng điều kiện hỗ trợ.")
 
-    class FakeVerifier:
-        def __init__(self, llm):
-            pass
-
-        def run(self, **kwargs):
-            return VerificationReport(passed=True)
-
     monkeypatch.setattr(pipeline_module, "QueryPlannerAgent", FakePlanner)
-    monkeypatch.setattr(pipeline_module, "EvidenceSelectorAgent", FakeSelector)
     monkeypatch.setattr(pipeline_module, "ReasonerAgent", FakeReasoner)
-    monkeypatch.setattr(pipeline_module, "VerificationAgent", FakeVerifier)
 
     pipeline = InferencePipeline(
         llm=object(),
@@ -112,9 +77,10 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
     result = pipeline.run("Câu hỏi", question_id=7)
 
     assert result.submission.id == 7
-    assert result.submission.relevant_docs == ["04/2017/QH14"]
-    assert result.selected_evidence == [evidence]
-    assert result.verification.passed is True
+    assert result.submission.relevant_docs == [
+        "04/2017/QH14|Luật 04/2017/QH14 Hỗ trợ doanh nghiệp nhỏ và vừa"
+    ]
+    assert result.final_candidates == [evidence]
 
 
 def test_expansion_gates_graph_and_context():

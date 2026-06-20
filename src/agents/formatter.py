@@ -2,7 +2,6 @@ from src.schema.agent_schemas import (
     AnswerDraft,
     Evidence,
     SubmissionItem,
-    VerificationReport,
 )
 
 
@@ -13,27 +12,28 @@ class SubmissionFormatterAgent:
         question: str,
         answer: AnswerDraft,
         evidence: list[Evidence],
-        verification: VerificationReport,
     ) -> SubmissionItem:
-        if not verification.passed:
-            raise ValueError("Câu trả lời chưa vượt qua bước verification.")
-
         relevant_docs = []
         relevant_articles = []
 
         for item in evidence:
             doc_code = item.doc_code or item.metadata.get("doc_code")
+            doc_title = (
+                item.doc_title_submission
+                or item.metadata.get("doc_title_submission")
+                or item.metadata.get("doc_name_for_submission")
+            )
             article = item.article or item.metadata.get("article")
 
-            if doc_code and doc_code not in relevant_docs:
-                relevant_docs.append(str(doc_code))
+            if not doc_code or not doc_title:
+                continue
+
+            doc_citation = f"{doc_code}|{doc_title}"
+            if doc_citation not in relevant_docs:
+                relevant_docs.append(doc_citation)
 
             if article:
-                citation = (
-                    f"{doc_code} - {article}"
-                    if doc_code
-                    else str(article)
-                )
+                citation = f"{doc_citation}|{article}"
                 if citation not in relevant_articles:
                     relevant_articles.append(citation)
 

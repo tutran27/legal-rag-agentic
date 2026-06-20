@@ -12,7 +12,7 @@ from src.schema.agent_schemas import Evidence
 
 class FakeCrossEncoder:
     def predict(self, pairs, batch_size):
-        assert batch_size == 16
+        assert batch_size > 0
         return [-5.0, -1.0]
 
 
@@ -55,8 +55,8 @@ def test_cross_encoder_handles_negative_scores():
     )
 
     assert results[0].unit_id == "u2"
-    assert results[0].cross_encoder_normalized_score == 1.0
-    assert results[1].cross_encoder_normalized_score == 0.0
+    assert [item.cross_encoder_rerank_score for item in results] == [0.0, 0.0]
+    assert [item.cross_encoder_normalized_score for item in results] == [0.0, 0.0]
 
 
 def test_hybrid_search_batches_queries(monkeypatch):

@@ -12,6 +12,20 @@ HARRIER_QUERY_INSTRUCTION = (
 )
 
 
+def get_torch_device() -> str:
+    configured = settings.rerank_device.lower()
+    if configured == "cuda":
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "RERANK_DEVICE=cuda nhưng PyTorch hiện tại không hỗ trợ CUDA. "
+                "Cài PyTorch bản CUDA hoặc đổi RERANK_DEVICE=cpu/auto."
+            )
+        return "cuda"
+    if configured == "cpu":
+        return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def download_model(model_name: str, hf_token: str | None = None) -> str:
     return snapshot_download(
         repo_id=model_name,
@@ -26,15 +40,16 @@ def load_dense_model(
 ) -> SentenceTransformer:
     token = hf_token or settings.hf_token
     model_path = download_model(model_name, token)
+    device = get_torch_device()
     model_kwargs = (
         {"torch_dtype": torch.float16}
-        if torch.cuda.is_available()
+        if device == "cuda"
         else None
     )
     return SentenceTransformer(
         model_path,
         token=token,
-        device="cuda" if torch.cuda.is_available() else "cpu",
+        device=device,
         model_kwargs=model_kwargs,
     )
 
@@ -44,7 +59,12 @@ def load_colbert_model(
     hf_token: str | None = None,
 ) -> BGEM3FlagModel:
     model_path = download_model(model_name, hf_token or settings.hf_token)
-    return BGEM3FlagModel(model_path, use_fp16=True)
+    device = get_torch_device()
+    return BGEM3FlagModel(
+        model_path,
+        use_fp16=device == "cuda",
+        devices=device,
+    )
 
 
 def embed_dense(

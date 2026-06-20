@@ -1,25 +1,11 @@
 import argparse
 import json
-import os
 import sys
 import time
 from pathlib import Path
 
 from pydantic import TypeAdapter, ValidationError
 
-
-os.environ.setdefault("LLM_BACKEND", "local")
-os.environ.setdefault("LOCAL_LLM_MODEL", "Qwen/Qwen3-4B-Instruct-2507")
-os.environ.setdefault("LOCAL_LLM_MAX_MODEL_LEN", "4096")
-os.environ.setdefault("LOCAL_LLM_LOAD_IN_4BIT", "true")
-os.environ.setdefault("COLBERT_BATCH_SIZE", "4")
-os.environ.setdefault("CROSS_ENCODER_BATCH_SIZE", "4")
-os.environ.setdefault("RERANK_MAX_CHARS", "800")
-os.environ.setdefault("INITIAL_FUSION_TOP_K", "40")
-os.environ.setdefault("COLBERT_TOP_K", "20")
-os.environ.setdefault("CROSS_ENCODER_TOP_K", "15")
-os.environ.setdefault("FINAL_TOP_K", "8")
-os.environ.setdefault("PRELOAD_GRAPH", "true")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 if hasattr(sys.stdout, "reconfigure"):
@@ -44,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--errors", default=DEFAULT_ERRORS)
     parser.add_argument("--limit", type=int, default=2000)
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--llm", choices=["endpoint", "local"], default=None)
+    parser.add_argument("--llm", choices=["groq", "endpoint", "local"], default=None)
     parser.add_argument("--local-model", default=None)
     return parser.parse_args()
 
@@ -59,22 +45,54 @@ def load_questions(path: str | Path, limit: int | None) -> list[TestQuestion]:
     return questions[:limit] if limit else questions
 
 
+def has_valid_citation_format(item: SubmissionItem) -> bool:
+    for citation in item.relevant_docs:
+        parts = citation.split("|", 1)
+        if len(parts) != 2 or not all(parts):
+            return False
+    for citation in item.relevant_articles:
+        parts = citation.split("|", 2)
+        if len(parts) != 3 or not all(parts):
+            return False
+    return True
+
+
 def load_results(path: str | Path) -> dict[int, SubmissionItem]:
     result_path = Path(path)
     if not result_path.exists():
         return {}
-    data = json.loads(result_path.read_text(encoding="utf-8-sig"))
+    content = result_path.read_text(encoding="utf-8-sig").strip()
+    if not content:
+        return {}
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Output JSON hỏng hoặc chưa ghi xong: {result_path}") from error
     if not isinstance(data, list):
         raise ValueError("Output hiện có phải là list JSON.")
     items = TypeAdapter(list[SubmissionItem]).validate_python(data)
-    return {item.id: item for item in items}
+    valid_items = {
+        item.id: item
+        for item in items
+        if has_valid_citation_format(item)
+    }
+    invalid_count = len(items) - len(valid_items)
+    if invalid_count:
+        print(
+            f"Bỏ qua {invalid_count} kết quả dùng format citation cũ; "
+            "các query này sẽ được chạy lại."
+        )
+    return valid_items
 
 
 def load_errors(path: str | Path) -> list[dict]:
     error_path = Path(path)
     if not error_path.exists():
         return []
-    data = json.loads(error_path.read_text(encoding="utf-8-sig"))
+    content = error_path.read_text(encoding="utf-8-sig").strip()
+    if not content:
+        return []
+    data = json.loads(content)
     return data if isinstance(data, list) else []
 
 
@@ -109,8 +127,8 @@ def fallback_submission(question: TestQuestion, error: Exception) -> SubmissionI
 
 
 def build_pipeline(args: argparse.Namespace):
-    from src.generation.endpoint import create_llm_client
     from src.pipeline import InferencePipeline
+    from src.generation.endpoint import create_llm_client
 
     llm = create_llm_client(args.llm, args.local_model)
     return InferencePipeline(llm=llm, verbose=False)
@@ -121,6 +139,8 @@ def run_batch(args: argparse.Namespace) -> None:
     results = load_results(args.output) if args.resume else {}
     errors = load_errors(args.errors) if args.resume else []
     pending = [item for item in questions if item.id not in results]
+    write_ordered_results(questions, results, args.output)
+    write_errors(errors, args.errors)
 
     print(
         f"Tổng câu hỏi: {len(questions)} | đã có: {len(results)} | "
@@ -144,7 +164,9 @@ def run_batch(args: argparse.Namespace) -> None:
                 results[question.id] = output.submission
             except Exception as error:
                 status = "ERROR"
-                results[question.id] = fallback_submission(question, error)
+                errors = [
+                    item for item in errors if item.get("id") != question.id
+                ]
                 errors.append(
                     {
                         "id": question.id,
@@ -152,6 +174,7 @@ def run_batch(args: argparse.Namespace) -> None:
                         "error": str(error),
                     }
                 )
+                print(f"[ERROR DETAIL] id={question.id}: {error}")
 
             write_ordered_results(questions, results, args.output)
             write_errors(errors, args.errors)

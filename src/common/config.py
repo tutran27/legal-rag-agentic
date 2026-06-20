@@ -1,5 +1,9 @@
-
 import os
+
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 
 def _get_int(name: str, default: int) -> int:
@@ -46,21 +50,28 @@ class Settings:
     qdrant_hnsw_ef = _get_int("QDRANT_HNSW_EF", 64)
     colbert_batch_size = _get_int("COLBERT_BATCH_SIZE", 16)
     cross_encoder_batch_size = _get_int("CROSS_ENCODER_BATCH_SIZE", 16)
-    retrieval_top_k = _get_int("RETRIEVAL_TOP_K", 60)
-    initial_fusion_top_k = _get_int("INITIAL_FUSION_TOP_K", 40)
-    colbert_top_k = _get_int("COLBERT_TOP_K", 20)
-    cross_encoder_top_k = _get_int("CROSS_ENCODER_TOP_K", 15)
+    retrieval_top_k = _get_int("RETRIEVAL_TOP_K", 30)
+    initial_fusion_top_k = _get_int("INITIAL_FUSION_TOP_K", 30)
+    colbert_top_k = _get_int("COLBERT_TOP_K", 15)
+    cross_encoder_top_k = _get_int("CROSS_ENCODER_TOP_K", 8)
     graph_seed_top_k = _get_int("GRAPH_SEED_TOP_K", 5)
     graph_top_k = _get_int("GRAPH_TOP_K", 10)
     context_top_k = _get_int("CONTEXT_TOP_K", 10)
-    final_top_k = _get_int("FINAL_TOP_K", 8)
-    rerank_max_chars = _get_int("RERANK_MAX_CHARS", 800)
+    final_top_k = _get_int("FINAL_TOP_K", 6)
+    rerank_max_chars = _get_int("RERANK_MAX_CHARS", 1000)
+    rerank_device = os.getenv("RERANK_DEVICE", "cuda")
+    cross_encoder_model = os.getenv(
+        "CROSS_ENCODER_MODEL",
+        "Qwen/Qwen3-Reranker-0.6B",
+    )
     graph_path = os.getenv(
         "GRAPH_PATH",
         "data/indexes/graph/legal_graph.pkl",
     )
     preload_graph = _get_bool("PRELOAD_GRAPH", True)
     store_text = _get_bool("STORE_TEXT", True)
+    enable_colbert = _get_bool("ENABLE_COLBERT", True)
+    enable_cross_encoder = _get_bool("ENABLE_CROSS_ENCODER", True)
 
 
 settings = Settings()
