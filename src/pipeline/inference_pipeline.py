@@ -165,6 +165,11 @@ class InferencePipeline:
         self._planning_cache[question] = planning
         return planning
 
+    def _get_llm_for_query(self) -> Any:
+        if hasattr(self.llm, "for_query"):
+            return self.llm.for_query()
+        return self.llm
+
     def _get_dense_vectors(self, query_texts: list[str]):
         if not hasattr(self, "_dense_cache"):
             self._dense_cache = {}
@@ -628,6 +633,7 @@ class InferencePipeline:
         candidates,
         latencies,
         query_started,
+        llm,
     ) -> InferenceResult:
         candidates = self._expand(question, plan, candidates, latencies)
         final_candidates = self._rerank(
@@ -639,7 +645,7 @@ class InferencePipeline:
         self._print_results(final_candidates)
 
         started = time.perf_counter()
-        reasoner = ReasonerAgent(self.llm)
+        reasoner = ReasonerAgent(llm)
         answer = reasoner.run(
             question=question,
             understanding=understanding,
@@ -665,7 +671,8 @@ class InferencePipeline:
         latencies: dict[str, float] = {}
         query_started = time.perf_counter()
         started = time.perf_counter()
-        planning = self._get_planning(question)
+        llm = self._get_llm_for_query()
+        planning = QueryPlannerAgent(llm).run(question)
         self._log_latency(
             "Query planning",
             started,
@@ -683,6 +690,7 @@ class InferencePipeline:
             candidates,
             latencies,
             query_started,
+            llm=llm,
         )
 
     def run_many(
@@ -698,7 +706,8 @@ class InferencePipeline:
             query_started = time.perf_counter()
             started = time.perf_counter()
             try:
-                planning = self._get_planning(question)
+                llm = self._get_llm_for_query()
+                planning = QueryPlannerAgent(llm).run(question)
                 latencies["Query planning"] = (
                     time.perf_counter() - started
                 )
@@ -710,6 +719,7 @@ class InferencePipeline:
                         planning,
                         latencies,
                         query_started,
+                        llm,
                     )
                 )
             except Exception as error:
@@ -726,6 +736,7 @@ class InferencePipeline:
                         planning,
                         latencies,
                         _,
+                        _,
                     ) in planned
                 ]
             )
@@ -740,6 +751,7 @@ class InferencePipeline:
                     planning,
                     latencies,
                     query_started,
+                    llm,
                 ) = planned_item
                 try:
                     outputs[index] = self._complete(
@@ -750,6 +762,7 @@ class InferencePipeline:
                         candidates,
                         latencies,
                         query_started,
+                        llm=llm,
                     )
                 except Exception as error:
                     outputs[index] = error

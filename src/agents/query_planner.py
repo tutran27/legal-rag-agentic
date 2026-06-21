@@ -11,7 +11,7 @@ from src.schema.agent_schemas import (
 )
 
 
-QUERY_PLAN_MAX_TOKENS =512
+QUERY_PLAN_MAX_TOKENS =384
 
 INTENT_CONTEXT = {
     "condition": "điều kiện tiêu chí đối tượng được hỗ trợ",

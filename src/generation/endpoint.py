@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DEFAULT_ENDPOINT_URL = (
-    "https://onthi206--qwen2-5-14b-vllm-serve.modal.run"
+    "https://tutran27dut--qwen2-5-14b-vllm-serve.modal.run"
 )
 DEFAULT_ENDPOINT_MODEL = "qwen2.5-14b-instruct"
 DEFAULT_SYSTEM_PROMPT = (
@@ -45,6 +45,34 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if raw is None or raw.strip() == "":
         return default
     return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _split_env_list(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    values = []
+    for part in re.split(r"[\n,;]+", raw):
+        item = part.strip()
+        if item:
+            values.append(item)
+    return values
+
+
+def _load_groq_api_keys(primary_key: str | None) -> list[str]:
+    keys = []
+    for key in [primary_key, os.getenv("GROQ_API_KEY")]:
+        if key and key not in keys:
+            keys.append(key)
+
+    for index in range(1, 13):
+        key = os.getenv(f"GROQ_API_KEY_{index}")
+        if key and key not in keys:
+            keys.append(key)
+
+    for key in _split_env_list(os.getenv("GROQ_API_KEYS")):
+        if key not in keys:
+            keys.append(key)
+    return keys
 
 
 def _json_repair_prompt(system_prompt: str | None) -> str:
@@ -209,25 +237,53 @@ class GroqLLMClient:
     def __init__(
         self,
         api_key: str | None = None,
+        api_keys: list[str] | None = None,
         model: str | None = None,
         base_url: str | None = None,
         timeout: int | None = None,
+        retry_attempts: int | None = None,
+        retry_delay: float | None = None,
         session: requests.Session | None = None,
     ) -> None:
-        self.api_key = api_key or os.getenv("GROQ_API_KEY")
-        if not self.api_key:
+        self.api_keys = api_keys or _load_groq_api_keys(api_key)
+        if not self.api_keys:
             raise ValueError("Thiếu GROQ_API_KEY để dùng LLM_BACKEND=groq.")
+        self.api_key = self.api_keys[0]
         self.model = model or os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL
         self.base_url = (
             base_url or os.getenv("GROQ_BASE_URL") or DEFAULT_GROQ_BASE_URL
         ).rstrip("/")
         self.timeout = timeout or int(os.getenv("GROQ_TIMEOUT", "120"))
-        self.retry_attempts = int(os.getenv("GROQ_RETRY_ATTEMPTS", "4"))
-        self.retry_delay = float(os.getenv("GROQ_RETRY_DELAY", "5"))
+        self.retry_attempts = retry_attempts or int(
+            os.getenv("GROQ_RETRY_ATTEMPTS", "4")
+        )
+        self.retry_delay = retry_delay or float(
+            os.getenv("GROQ_RETRY_DELAY", "5")
+        )
         self.session = session or requests.Session()
+        self._next_api_key_index = 0
 
     def health(self) -> dict[str, Any]:
-        return {"backend": "groq", "model": self.model}
+        return {
+            "backend": "groq",
+            "model": self.model,
+            "api_key_count": len(self.api_keys),
+        }
+
+    def for_query(self) -> "GroqLLMClient":
+        api_key = self.api_keys[self._next_api_key_index]
+        self._next_api_key_index = (
+            self._next_api_key_index + 1
+        ) % len(self.api_keys)
+        return GroqLLMClient(
+            api_keys=[api_key],
+            model=self.model,
+            base_url=self.base_url,
+            timeout=self.timeout,
+            retry_attempts=self.retry_attempts,
+            retry_delay=self.retry_delay,
+            session=self.session,
+        )
 
     def generate(
         self,

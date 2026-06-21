@@ -8,8 +8,8 @@ from src.schema.agent_schemas import (
 )
 
 
-REASONER_MAX_TOKENS = 512
-REASONER_EVIDENCE_CHARS = 768
+REASONER_MAX_TOKENS = 384
+REASONER_EVIDENCE_CHARS = 512
 
 
 class ReasonerAgent:

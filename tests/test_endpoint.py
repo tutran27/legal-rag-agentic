@@ -168,3 +168,22 @@ def test_groq_logs_http_retry_stage(capsys):
 
     assert result == "ok"
     assert "stage=reasoning reason=http_429 attempt=1/4" in capsys.readouterr().out
+
+
+def test_groq_rotates_api_keys_per_query():
+    client = GroqLLMClient(
+        api_keys=["key-1", "key-2", "key-3"],
+        session=Mock(),
+    )
+
+    query_1 = client.for_query()
+    query_2 = client.for_query()
+    query_3 = client.for_query()
+    query_4 = client.for_query()
+
+    assert query_1.api_key == "key-1"
+    assert query_2.api_key == "key-2"
+    assert query_3.api_key == "key-3"
+    assert query_4.api_key == "key-1"
+    assert query_1.api_keys == ["key-1"]
+    assert query_4.api_keys == ["key-1"]
