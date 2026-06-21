@@ -18,7 +18,7 @@ def validate_submission_item(
     )
     if errors:
         message = "; ".join(error.message for error in errors)
-        raise ValueError(f"Submission không đúng JSON Schema: {message}")
+        raise ValueError(f"Submission khong dung JSON Schema: {message}")
 
     valid_docs = set()
     valid_articles = set()
@@ -42,7 +42,7 @@ def validate_submission_item(
     invalid_articles = set(item.relevant_articles) - valid_articles
     if invalid_docs or invalid_articles:
         raise ValueError(
-            "Citation không thuộc final candidates: "
+            "Citation khong thuoc selected evidence: "
             f"docs={sorted(invalid_docs)}, "
             f"articles={sorted(invalid_articles)}"
         )
@@ -55,12 +55,12 @@ def load_and_validate_results(
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError) as error:
-        raise ValueError(f"Không đọc được {path}: {error}") from error
+        raise ValueError(f"Khong doc duoc {path}: {error}") from error
 
     if not isinstance(data, list):
-        raise ValueError("results.json phải là một danh sách.")
+        raise ValueError("results.json phai la mot danh sach.")
 
     try:
         return [SubmissionItem.model_validate(item) for item in data]
     except ValidationError as error:
-        raise ValueError(f"results.json không đúng schema: {error}") from error
+        raise ValueError(f"results.json khong dung schema: {error}") from error

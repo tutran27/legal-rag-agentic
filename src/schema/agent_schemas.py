@@ -101,6 +101,18 @@ class Evidence(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SelectedEvidence(BaseModel):
+    unit_id: str
+    role: Literal["main", "supporting", "background"] = "main"
+    reason: str = ""
+    supported_claims: list[str] = Field(default_factory=list)
+
+
+class EvidenceSelectionResult(BaseModel):
+    selected: list[SelectedEvidence]
+    rejected: list[dict[str, str]] = Field(default_factory=list)
+
+
 class AnswerDraft(BaseModel):
     answer: str
 
@@ -116,6 +128,7 @@ class SubmissionItem(BaseModel):
 class InferenceResult(BaseModel):
     submission: SubmissionItem
     final_candidates: list[Evidence] = Field(default_factory=list)
+    selected_evidence: list[Evidence] = Field(default_factory=list)
     latencies: dict[str, float] = Field(default_factory=dict)
 
 
@@ -133,6 +146,7 @@ class AgentState(BaseModel):
     filtered_candidates: list[Evidence] = Field(default_factory=list)
     reranked_candidates: list[Evidence] = Field(default_factory=list)
     expanded_candidates: list[Evidence] = Field(default_factory=list)
+    selected_evidence: list[Evidence] = Field(default_factory=list)
 
     answer: str | None = None
     submission_item: SubmissionItem | None = None

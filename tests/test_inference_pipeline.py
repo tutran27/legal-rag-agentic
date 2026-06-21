@@ -14,25 +14,26 @@ from src.schema.agent_schemas import (
 def test_pipeline_runs_with_injected_dependencies(monkeypatch):
     evidence = Evidence(
         unit_id="doc-1::article-1",
-        text="Nội dung hỗ trợ doanh nghiệp.",
+        text="Noi dung ho tro doanh nghiep.",
         final_score=1.0,
         metadata={
             "doc_code": "04/2017/QH14",
-            "doc_title_submission": "Luật 04/2017/QH14 Hỗ trợ doanh nghiệp nhỏ và vừa",
-            "article": "Điều 5",
+            "doc_title_submission": "Luat 04/2017/QH14 Ho tro doanh nghiep nho va vua",
+            "article": "Dieu 5",
         },
     )
     planning = PlanningResult(
-        understanding=LegalUnderstanding(intent="tra cứu"),
+        understanding=LegalUnderstanding(intent="tra cuu"),
         plan=QueryPlan(
             queries=[
                 SearchQuery(
                     query_type="original",
-                    text="Câu hỏi",
+                    text="Cau hoi",
                 )
             ]
         ),
     )
+
     class FakePlanner:
         def __init__(self, llm):
             pass
@@ -40,14 +41,29 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
         def run(self, question):
             return planning
 
+    class FakeSelector:
+        def __init__(self, llm):
+            pass
+
+        def run(self, question, candidates):
+            return type(
+                "Selection",
+                (),
+                {"selected": [type("Item", (), {"unit_id": "doc-1::article-1"})()]},
+            )()
+
+        def get_selected_evidence(self, candidates):
+            return candidates
+
     class FakeReasoner:
         def __init__(self, llm):
             pass
 
         def run(self, **kwargs):
-            return AnswerDraft(answer="Doanh nghiệp đáp ứng điều kiện hỗ trợ.")
+            return AnswerDraft(answer="Doanh nghiep dap ung dieu kien ho tro.")
 
     monkeypatch.setattr(pipeline_module, "QueryPlannerAgent", FakePlanner)
+    monkeypatch.setattr(pipeline_module, "EvidenceSelectorAgent", FakeSelector)
     monkeypatch.setattr(pipeline_module, "ReasonerAgent", FakeReasoner)
 
     pipeline = InferencePipeline(
@@ -74,19 +90,20 @@ def test_pipeline_runs_with_injected_dependencies(monkeypatch):
         lambda question, plan, candidates, latencies: candidates,
     )
 
-    result = pipeline.run("Câu hỏi", question_id=7)
+    result = pipeline.run("Cau hoi", question_id=7)
 
     assert result.submission.id == 7
     assert result.submission.relevant_docs == [
-        "04/2017/QH14|Luật 04/2017/QH14 Hỗ trợ doanh nghiệp nhỏ và vừa"
+        "04/2017/QH14|Luat 04/2017/QH14 Ho tro doanh nghiep nho va vua"
     ]
     assert result.final_candidates == [evidence]
+    assert result.selected_evidence == [evidence]
 
 
 def test_expansion_gates_graph_and_context():
     strong = Evidence(
         unit_id="u1",
-        text="Nội dung",
+        text="Noi dung",
         vote_count=2,
         metadata={"part_count": 1},
     )
@@ -95,9 +112,11 @@ def test_expansion_gates_graph_and_context():
         update={"metadata": {"part_count": 2, "part_index": 0}}
     )
 
-    assert InferencePipeline._needs_graph("Câu hỏi thông thường", [strong]) is False
-    assert InferencePipeline._needs_graph("Văn bản hướng dẫn", [strong]) is True
-    assert InferencePipeline._needs_graph("Câu hỏi thông thường", [weak]) is True
+    graph_term = next(iter(pipeline_module.GRAPH_TERMS))
+
+    assert InferencePipeline._needs_graph("Cau hoi thong thuong", [strong]) is False
+    assert InferencePipeline._needs_graph(graph_term, [strong]) is True
+    assert InferencePipeline._needs_graph("Cau hoi thong thuong", [weak]) is True
     assert InferencePipeline._needs_context([strong]) is False
     assert InferencePipeline._needs_context([split]) is True
 
@@ -108,7 +127,7 @@ def test_retrieve_passes_shared_client_to_exact(monkeypatch):
     pipeline.dense_model = object()
     pipeline.qdrant_client = object()
     plan = QueryPlan(
-        queries=[SearchQuery(query_type="original", text="Câu hỏi")],
+        queries=[SearchQuery(query_type="original", text="Cau hoi")],
         retrieval=RetrievalPlan(
             use_dense=False,
             use_sparse=True,
@@ -130,7 +149,7 @@ def test_retrieve_passes_shared_client_to_exact(monkeypatch):
 
     monkeypatch.setattr(pipeline_module, "exact_search", fake_exact)
 
-    pipeline._retrieve("Câu hỏi", plan, {})
+    pipeline._retrieve("Cau hoi", plan, {})
 
     assert received["client"] is pipeline.qdrant_client
     assert "graph_path" not in received
@@ -164,7 +183,7 @@ def test_run_many_keeps_order_and_returns_item_error(monkeypatch):
     monkeypatch.setattr(
         pipeline,
         "_complete",
-        lambda question, question_id, *args: question_id,
+        lambda question, question_id, *args, **kwargs: question_id,
     )
 
     results = pipeline.run_many([(1, "good"), (2, "bad")])

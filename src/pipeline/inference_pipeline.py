@@ -6,6 +6,7 @@ import torch
 from qdrant_client import QdrantClient, models
 from sentence_transformers import CrossEncoder
 
+from src.agents.evidence_selector import EvidenceSelectorAgent
 from src.agents.formatter import SubmissionFormatterAgent
 from src.agents.query_planner import QueryPlannerAgent
 from src.agents.reasoner import ReasonerAgent
@@ -624,6 +625,29 @@ class InferencePipeline:
             )
             self._print(candidate.text[:500].replace("\n", " "))
 
+    def _select_evidence(
+        self,
+        question: str,
+        candidates: list[Evidence],
+        llm: Any,
+        latencies: dict[str, float],
+    ) -> list[Evidence]:
+        started = time.perf_counter()
+        selector = EvidenceSelectorAgent(llm)
+        selection = selector.run(question=question, candidates=candidates)
+        selected_by_id = {
+            item.unit_id: item for item in selection.selected
+        }
+        selected_evidence = [
+            candidate
+            for candidate in selector.get_selected_evidence(candidates)
+            if candidate.unit_id in selected_by_id
+        ]
+        if not selected_evidence:
+            selected_evidence = selector.get_selected_evidence(candidates)[:1]
+        self._log_latency("Evidence selection", started, latencies)
+        return selected_evidence
+
     def _complete(
         self,
         question,
@@ -643,13 +667,19 @@ class InferencePipeline:
             latencies,
         )
         self._print_results(final_candidates)
+        selected_evidence = self._select_evidence(
+            question,
+            final_candidates,
+            llm,
+            latencies,
+        )
 
         started = time.perf_counter()
         reasoner = ReasonerAgent(llm)
         answer = reasoner.run(
             question=question,
             understanding=understanding,
-            evidence=final_candidates,
+            evidence=selected_evidence,
         )
         self._log_latency("Reasoning", started, latencies)
 
@@ -657,13 +687,14 @@ class InferencePipeline:
             question_id=question_id,
             question=question,
             answer=answer,
-            evidence=final_candidates,
+            evidence=selected_evidence,
         )
-        validate_submission_item(submission, final_candidates)
+        validate_submission_item(submission, selected_evidence)
         latencies["Total query"] = time.perf_counter() - query_started
         return InferenceResult(
             submission=submission,
             final_candidates=final_candidates,
+            selected_evidence=selected_evidence,
             latencies=latencies,
         )
 

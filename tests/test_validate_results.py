@@ -1,5 +1,6 @@
-import pytest
 import json
+
+import pytest
 
 from src.schema.agent_schemas import Evidence, SubmissionItem
 from src.submission.validate_results import (
@@ -12,26 +13,26 @@ def make_evidence():
     return [
         Evidence(
             unit_id="u1",
-            text="Nội dung",
+            text="Noi dung",
             metadata={
                 "doc_code": "04/2017/QH14",
-                "doc_title_submission": "Luật 04/2017/QH14 Hỗ trợ doanh nghiệp nhỏ và vừa",
-                "article": "Điều 5",
+                "doc_title_submission": "Luat 04/2017/QH14 Ho tro doanh nghiep nho va vua",
+                "article": "Dieu 5",
             },
         )
     ]
 
 
-def test_validator_accepts_final_candidate_citations():
+def test_validator_accepts_selected_evidence_citations():
     item = SubmissionItem(
         id=1,
-        question="Câu hỏi",
-        answer="Câu trả lời",
+        question="Cau hoi",
+        answer="Cau tra loi",
         relevant_docs=[
-            "04/2017/QH14|Luật 04/2017/QH14 Hỗ trợ doanh nghiệp nhỏ và vừa"
+            "04/2017/QH14|Luat 04/2017/QH14 Ho tro doanh nghiep nho va vua"
         ],
         relevant_articles=[
-            "04/2017/QH14|Luật 04/2017/QH14 Hỗ trợ doanh nghiệp nhỏ và vừa|Điều 5"
+            "04/2017/QH14|Luat 04/2017/QH14 Ho tro doanh nghiep nho va vua|Dieu 5"
         ],
     )
 
@@ -41,13 +42,13 @@ def test_validator_accepts_final_candidate_citations():
 def test_validator_rejects_unknown_citation():
     item = SubmissionItem(
         id=1,
-        question="Câu hỏi",
-        answer="Câu trả lời",
-        relevant_docs=["Không tồn tại"],
+        question="Cau hoi",
+        answer="Cau tra loi",
+        relevant_docs=["Khong ton tai"],
         relevant_articles=[],
     )
 
-    with pytest.raises(ValueError, match="Citation không thuộc"):
+    with pytest.raises(ValueError, match="Citation"):
         validate_submission_item(item, make_evidence())
 
 
@@ -58,8 +59,8 @@ def test_load_and_validate_results(tmp_path):
             [
                 {
                     "id": 1,
-                    "question": "Câu hỏi",
-                    "answer": "Câu trả lời",
+                    "question": "Cau hoi",
+                    "answer": "Cau tra loi",
                     "relevant_docs": [],
                     "relevant_articles": [],
                 }
