@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 DEFAULT_ENDPOINT_URL = (
-    "https://tutran27dut--qwen2-5-14b-vllm-serve.modal.run"
+    "https://hieudan2810--qwen2-5-14b-vllm-serve.modal.run"
 )
 DEFAULT_ENDPOINT_MODEL = "qwen2.5-14b-instruct"
 DEFAULT_SYSTEM_PROMPT = (

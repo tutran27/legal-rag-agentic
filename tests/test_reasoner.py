@@ -21,52 +21,52 @@ class FakeLLM:
         return self.response
 
 
-def test_reasoner_uses_final_evidence_and_metadata():
+def test_reasoner_uses_selected_evidence_and_short_prompt():
     llm = FakeLLM(
         {
-            "answer": "Doanh nghiệp phải đáp ứng các điều kiện được quy định."
+            "answer": "Doanh nghiep phai dap ung cac dieu kien ho tro theo noi dung duoc cung cap."
         }
     )
     evidence = [
         Evidence(
             unit_id="u1",
-            text="Tiêu đề và nội dung đầy đủ.",
+            text="Tieu de va noi dung day du.",
             final_score=1.5,
             metadata={
                 "doc_code": "04/2017/QH14",
-                "article": "Điều 5",
-                "content_text": "Nội dung pháp lý chính.",
+                "article": "Dieu 5",
+                "content_text": "Noi dung phap ly chinh.",
             },
         )
     ]
 
     result = ReasonerAgent(llm).run(
-        question="Điều kiện hỗ trợ là gì?",
+        question="Dieu kien ho tro la gi?",
         understanding=LegalUnderstanding(),
         evidence=evidence,
     )
 
     payload = json.loads(llm.query)
-    assert result.answer == "Doanh nghiệp phải đáp ứng các điều kiện được quy định."
+    assert (
+        result.answer
+        == "Doanh nghiep phai dap ung cac dieu kien ho tro theo noi dung duoc cung cap."
+    )
     assert payload["evidence"][0]["final_score"] == 1.5
-    assert payload["evidence"][0]["text"] == "Nội dung pháp lý chính."
-    assert "lấy ra những thông tin phù hợp trực tiếp" in llm.system_prompt
-    assert "Ưu tiên điều kiện, đối tượng, ngoại lệ và thủ tục" in llm.system_prompt
-    assert "tối đa 120 từ" in llm.system_prompt
-    assert "tối đa 4 gạch đầu dòng" in llm.system_prompt
-    assert "không được bỏ sót điều kiện" in llm.system_prompt
-    assert "ưu tiên trả lời đủ ý" in llm.system_prompt
-    assert llm.kwargs["max_new_tokens"] == 192
+    assert payload["evidence"][0]["text"] == "Noi dung phap ly chinh."
+    assert "Doc selected evidence va tra loi dung trong tam cau hoi." in llm.system_prompt
+    assert "Muc tieu toi da khoang 80 tu." in llm.system_prompt
+    assert "Khong nhac den dieu luat" in llm.system_prompt
+    assert llm.kwargs["max_new_tokens"] == 224
 
 
 def test_reasoner_stops_when_evidence_is_empty():
-    llm = FakeLLM({"answer": "Không được gọi."})
+    llm = FakeLLM({"answer": "Khong duoc goi."})
 
     result = ReasonerAgent(llm).run(
-        question="Điều kiện hỗ trợ là gì?",
+        question="Dieu kien ho tro la gi?",
         understanding=LegalUnderstanding(),
         evidence=[],
     )
 
-    assert "Chưa có đủ căn cứ pháp lý" in result.answer
+    assert "Chua co du can cu phap ly" in result.answer
     assert llm.query is None

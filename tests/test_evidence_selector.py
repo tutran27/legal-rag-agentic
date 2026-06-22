@@ -18,8 +18,7 @@ class FakeLLM:
                     "reason": "Invalid",
                     "supported_claims": [],
                 },
-            ],
-            "rejected": [],
+            ]
         }
 
 
@@ -30,7 +29,7 @@ def test_evidence_selector_validates_ids():
     ]
     result = EvidenceSelectorAgent(FakeLLM()).run("Question", candidates)
 
-    assert [item.unit_id for item in result.selected] == ["u2"]
+    assert [item.unit_id for item in result.selected] == ["u2", "u1"]
 
 
 def test_get_selected_evidence_keeps_multiple_articles_per_document():
@@ -68,7 +67,7 @@ def test_get_selected_evidence_keeps_multiple_articles_per_document():
 def test_selector_falls_back_to_top_score():
     class EmptyLLM:
         def call_llm_json(self, **kwargs):
-            return {"selected": [], "rejected": []}
+            return {"selected": []}
 
     candidates = [
         Evidence(unit_id="top", text="Top", final_score=2.0),
@@ -78,3 +77,29 @@ def test_selector_falls_back_to_top_score():
     result = EvidenceSelectorAgent(EmptyLLM()).run("Question", candidates)
 
     assert result.selected[0].unit_id == "top"
+    assert len(result.selected) == 2
+
+
+def test_selector_adds_second_item_when_llm_selects_too_few():
+    class OneItemLLM:
+        def call_llm_json(self, **kwargs):
+            return {
+                "selected": [
+                    {
+                        "unit_id": "u1",
+                        "role": "main",
+                        "reason": "Best match",
+                        "supported_claims": [],
+                    }
+                ]
+            }
+
+    candidates = [
+        Evidence(unit_id="u1", text="Top", final_score=2.0),
+        Evidence(unit_id="u2", text="Second", final_score=1.8),
+        Evidence(unit_id="u3", text="Third", final_score=1.5),
+    ]
+
+    result = EvidenceSelectorAgent(OneItemLLM()).run("Question", candidates)
+
+    assert [item.unit_id for item in result.selected[:2]] == ["u1", "u2"]
