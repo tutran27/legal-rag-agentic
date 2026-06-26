@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int)
     parser.add_argument(
         "--llm",
-        choices=["groq", "endpoint", "local"],
+        choices=["groq", "openrouter", "endpoint", "local"],
         default=None,
     )
     parser.add_argument("--local-model", default=None)

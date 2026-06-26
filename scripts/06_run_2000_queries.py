@@ -30,7 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--errors", default=DEFAULT_ERRORS)
     parser.add_argument("--limit", type=int, default=2000)
     parser.add_argument("--resume", action="store_true")
-    parser.add_argument("--llm", choices=["groq", "endpoint", "local"], default=None)
+    parser.add_argument("--llm", choices=["groq", "openrouter", "endpoint", "local"], default=None)
     parser.add_argument("--local-model", default=None)
     return parser.parse_args()
 

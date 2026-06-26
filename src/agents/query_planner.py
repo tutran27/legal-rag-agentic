@@ -43,7 +43,6 @@ TAXONOMY_ALIASES = {
 QUERY_PLANNER_PROMPT = """
 Bạn là Query Planner cho hệ thống Legal RAG Việt Nam.
 
-Nhiệm vụ: chỉ tạo kế hoạch truy vấn retrieval. Không trả phần understanding.
 
 Quy tắc bắt buộc:
 - Trả đúng 2 query: original và legal_rewrite.

@@ -8,7 +8,7 @@ from src.schema.agent_schemas import (
 )
 
 
-REASONER_MAX_TOKENS = 224
+REASONER_MAX_TOKENS = 512
 REASONER_EVIDENCE_CHARS = 512
 
 
@@ -48,26 +48,44 @@ class ReasonerAgent:
             )
 
         prompt = """
-Ban la Reasoner Agent cua he thong hoi dap phap luat Viet Nam.
+Bạn là Reasoner Agent của hệ thống hỏi đáp pháp luật Việt Nam.
 
-Nhiem vu:
-- Doc selected evidence va tra loi dung trong tam cau hoi.
-- Chi lay cac y khop truc tiep voi cau hoi.
+Nhiệm vụ:
 
-Quy tac:
-- Chi dung thong tin co trong evidence, khong them kien thuc ngoai.
-- Uu tien tra loi thang vao dieu nguoi dung hoi.
-- Giu du y quan trong nhu dieu kien, doi tuong, ngoai le, thu tuc, muc xu ly neu chung lien quan truc tiep.
-- Gop y trung de cau tra loi ngan hon.
-- Khong nhac den dieu luat, so van ban, evidence, retrieval, agent hay he thong.
-- Khong viet cau mo dau, ket luan chung hoac dien giai dai.
-- Cau tra loi nen tu 1 den 3 cau; chi dung gach dau dong neu that su can.
-- Muc tieu toi da khoang 80 tu. Neu phai chon, uu tien dung trong tam hon la dien giai nhieu.
+* Đọc câu hỏi người dùng và selected evidence/candidates.
+* Trả lời đúng trọng tâm câu hỏi bằng thông tin có trong evidence/candidates.
+* Chỉ lấy các ý phù hợp để trả lời, không bê nguyên toàn bộ nội dung.
 
-Chi tra ve JSON:
+Quy tắc chọn thông tin:
+
+* Ưu tiên evidence/candidates khớp trực tiếp với câu hỏi.
+* Nếu không có đoạn khớp trực tiếp, vẫn được dùng evidence/candidates có nội dung pháp lý liên quan và đủ cơ sở để suy ra câu trả lời.
+* Có thể chọn đoạn không nhắc lại đúng từ ngữ trong câu hỏi, miễn là cùng chủ thể, hành vi, điều kiện, quyền, nghĩa vụ, chế tài hoặc hệ quả pháp lý.
+* Không dùng đoạn chỉ giống từ khóa nhưng sai ngữ cảnh pháp lý.
+* Không thêm kiến thức ngoài evidence/candidates.
+
+Quy tắc trả lời:
+
+* Trả lời thẳng vào điều người dùng hỏi.
+* Giữ lại các ý quan trọng nếu liên quan trực tiếp: điều kiện, đối tượng, ngoại lệ, thủ tục, mức xử lý, quyền, nghĩa vụ.
+* Gộp ý trùng lặp để câu trả lời ngắn hơn.
+* Không nhắc đến điều luật, số văn bản, evidence, retrieval, candidates, agent hay hệ thống.
+* Không viết câu mở đầu chung như “Theo quy định...” nếu không cần.
+* Không kết luận dài dòng hoặc diễn giải lan man.
+* Câu trả lời nên từ 2 đến 4 câu.
+* Chỉ dùng gạch đầu dòng nếu câu hỏi yêu cầu liệt kê nhiều điều kiện hoặc nhiều mức xử lý.
+* Mục tiêu tối đa khoảng 80 từ. Nếu phải chọn, ưu tiên đúng trọng tâm hơn là đầy đủ quá mức.
+
+Trường hợp không đủ thông tin:
+
+* Nếu evidence/candidates không có nội dung đủ để trả lời, trả lời ngắn gọn rằng chưa có đủ thông tin để xác định.
+* Không tự suy đoán ngoài nội dung được cung cấp.
+
+Chỉ trả về JSON đúng format:
 {
-  "answer": "..."
+"answer": "..."
 }
+
 """
         data = self.llm.call_llm_json(
             query=json.dumps(

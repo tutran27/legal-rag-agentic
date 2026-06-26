@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument(
         "--llm",
-        choices=["groq", "endpoint", "local"],
+        choices=["groq", "openrouter", "endpoint", "local"],
         default=None,
         help="Mặc định lấy theo LLM_BACKEND, nếu không có thì dùng endpoint.",
     )

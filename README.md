@@ -225,7 +225,7 @@ chèn vào `results.json` theo thứ tự của file input và được xóa kh�
 python -m scripts.07_retry_failed_queries \
   --input R2AIStage1DATA.json \
   --output results.json \
-  --llm endpoint \
+  --llm openrouter \
   --errors inference_errors.json
 ```
 

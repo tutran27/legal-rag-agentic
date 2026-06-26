@@ -23,6 +23,8 @@ DEFAULT_LOCAL_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 JSON_RETRY_ATTEMPTS = 2
 DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct"
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 def _log_retry(
@@ -56,6 +58,10 @@ def _split_env_list(raw: str | None) -> list[str]:
         if item:
             values.append(item)
     return values
+
+
+def _load_openrouter_api_key(primary_key: str | None) -> str | None:
+    return primary_key or os.getenv("OPENROUTER_API_KEY")
 
 
 def _load_groq_api_keys(primary_key: str | None) -> list[str]:
@@ -388,6 +394,155 @@ class GroqLLMClient:
         ) from last_error
 
 
+class OpenRouterLLMClient:
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout: int | None = None,
+        retry_attempts: int | None = None,
+        retry_delay: float | None = None,
+        session: requests.Session | None = None,
+    ) -> None:
+        self.api_key = _load_openrouter_api_key(api_key)
+        if not self.api_key:
+            raise ValueError(
+                "Thiếu OPENROUTER_API_KEY để dùng LLM_BACKEND=openrouter."
+            )
+        self.model = (
+            model
+            or os.getenv("OPENROUTER_MODEL")
+            or DEFAULT_OPENROUTER_MODEL
+        )
+        self.base_url = (
+            base_url
+            or os.getenv("OPENROUTER_BASE_URL")
+            or DEFAULT_OPENROUTER_BASE_URL
+        ).rstrip("/")
+        self.timeout = timeout or int(os.getenv("OPENROUTER_TIMEOUT", "120"))
+        self.retry_attempts = retry_attempts or int(
+            os.getenv("OPENROUTER_RETRY_ATTEMPTS", "4")
+        )
+        self.retry_delay = retry_delay or float(
+            os.getenv("OPENROUTER_RETRY_DELAY", "5")
+        )
+        self.session = session or requests.Session()
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "backend": "openrouter",
+            "model": self.model,
+            "base_url": self.base_url,
+        }
+
+    def generate(
+        self,
+        query: str,
+        system_prompt: str | None = None,
+        temperature: float = 0.0,
+        max_new_tokens: int | None = None,
+        max_tokens: int | None = None,
+        top_p: float = 0.9,
+        retry_stage: str = "llm",
+        **_: Any,
+    ) -> str:
+        token_limit = max_tokens or max_new_tokens or 1536
+        response = None
+        for attempt in range(self.retry_attempts + 1):
+            response = self.session.post(
+                f"{self.base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://legal-rag-agent.local",
+                    "X-Title": "Legal RAG Agent",
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": system_prompt or DEFAULT_SYSTEM_PROMPT,
+                        },
+                        {"role": "user", "content": query},
+                    ],
+                    "max_tokens": token_limit,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                },
+                timeout=self.timeout,
+            )
+            if response.status_code not in {429, 500, 502, 503, 504}:
+                break
+            if attempt >= self.retry_attempts:
+                break
+            retry_after = response.headers.get("Retry-After")
+            delay = (
+                float(retry_after)
+                if retry_after and retry_after.replace(".", "", 1).isdigit()
+                else self.retry_delay * (2**attempt)
+            )
+            _log_retry(
+                retry_stage,
+                f"http_{response.status_code}",
+                attempt + 1,
+                self.retry_attempts,
+                delay,
+            )
+            time.sleep(delay)
+        if response is None:
+            raise RuntimeError("Không nhận được phản hồi từ OpenRouter.")
+        response.raise_for_status()
+        data = response.json()
+        try:
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ValueError(
+                "OpenRouter không trả về message content hợp lệ."
+            ) from error
+        if not isinstance(content, str):
+            raise ValueError("OpenRouter message content không phải chuỗi.")
+        return content
+
+    def call_llm_json(
+        self,
+        query: str,
+        system_prompt: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        retry_stage = str(kwargs.pop("retry_stage", "llm"))
+        last_error: Exception | None = None
+        output = ""
+        current_query = query
+        current_prompt = system_prompt
+        for attempt in range(JSON_RETRY_ATTEMPTS + 1):
+            output = self.generate(
+                query=current_query,
+                system_prompt=current_prompt,
+                retry_stage=retry_stage,
+                **kwargs,
+            )
+            try:
+                return EndpointLLMClient.extract_json_object(output)
+            except (json.JSONDecodeError, ValueError) as error:
+                last_error = error
+                if attempt >= JSON_RETRY_ATTEMPTS:
+                    break
+                _log_retry(
+                    retry_stage,
+                    "invalid_json",
+                    attempt + 1,
+                    JSON_RETRY_ATTEMPTS,
+                )
+                current_query = _json_repair_query(query, output)
+                current_prompt = _json_repair_prompt(system_prompt)
+        raise ValueError(
+            "OpenRouter trả về JSON không hợp lệ sau "
+            f"{JSON_RETRY_ATTEMPTS + 1} lần thử:\n{output}"
+        ) from last_error
+
+
 class LocalQwenLLMClient:
     def __init__(
         self,
@@ -537,15 +692,24 @@ class LocalQwenLLMClient:
 def create_llm_client(
     backend: str | None = None,
     local_model: str | None = None,
-) -> EndpointLLMClient | GroqLLMClient | LocalQwenLLMClient:
+) -> (
+    EndpointLLMClient
+    | GroqLLMClient
+    | OpenRouterLLMClient
+    | LocalQwenLLMClient
+):
     selected = (backend or os.getenv("LLM_BACKEND") or "endpoint").lower()
     if selected == "groq":
         return GroqLLMClient()
+    if selected == "openrouter":
+        return OpenRouterLLMClient()
     if selected == "endpoint":
         return EndpointLLMClient()
     if selected == "local":
         return LocalQwenLLMClient(model_name=local_model)
-    raise ValueError("LLM_BACKEND chỉ hỗ trợ 'groq', 'endpoint' hoặc 'local'.")
+    raise ValueError(
+        "LLM_BACKEND chỉ hỗ trợ 'groq', 'openrouter', 'endpoint' hoặc 'local'."
+    )
 
 
 if __name__ == "__main__":

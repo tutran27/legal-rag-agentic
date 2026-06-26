@@ -9,7 +9,7 @@ from src.schema.agent_schemas import (
 
 
 SELECTOR_MAX_TOKENS = 896
-SELECTOR_MAX_CANDIDATES = 4
+SELECTOR_MAX_CANDIDATES = 8
 SELECTOR_MAX_SELECTED = 4
 SELECTOR_MIN_SELECTED = 2
 SELECTOR_TEXT_CHARS = 450
@@ -57,7 +57,7 @@ Nhiệm vụ:
 Quy tắc:
 - Chỉ chọn unit_id có trong danh sách candidates.
 - Chỉ cần evidence liên quan và có thể dùng để trả lời câu hỏi thì nên giữ lại.
-- Ưu tiên 2 hoặc 3 evidence nếu đã đủ để trả lời rõ, nhưng không cần loại bỏ quá mạnh tay.
+- Ưu tiên 2 hoặc 3 evidence nếu đã đủ để trả lời rõ, nhưng không cần loại bỏ quá mạnh tay, lấy toàn bộ nếu tất cả đều cung cấp thông tin.
 - main: chứa căn cứ trực tiếp để trả lời.
 - supporting: bổ sung điều kiện, ngoại lệ, thủ tục hoặc hậu quả quan trọng.
 - background: chỉ giữ khi thật sự cần để hiểu câu trả lời.

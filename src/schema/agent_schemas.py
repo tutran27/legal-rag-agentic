@@ -54,12 +54,12 @@ class RetrievalPlan(BaseModel):
     use_context: bool = True
     use_summary: bool = False
 
-    top_k_exact: int = 20
-    top_k_bm25: int = 30
-    top_k_dense: int = 30
-    top_k_sparse: int = 30
-    top_k_colbert: int = 15
-    top_k_cross_encoder: int = 8
+    top_k_exact: int = 40
+    top_k_bm25: int = 60
+    top_k_dense: int = 60
+    top_k_sparse: int = 60
+    top_k_colbert: int = 30
+    top_k_cross_encoder: int = 20
     top_k_graph: int = 10
     top_k_summary: int = 30
 
