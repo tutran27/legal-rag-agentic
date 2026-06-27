@@ -129,8 +129,13 @@ def fallback_submission(question: TestQuestion, error: Exception) -> SubmissionI
 def build_pipeline(args: argparse.Namespace):
     from src.pipeline import InferencePipeline
     from src.generation.endpoint import create_llm_client
+    from src.common.config import settings
 
-    llm = create_llm_client(args.llm, args.local_model)
+    llm = (
+        None
+        if settings.retrieval_only
+        else create_llm_client(args.llm, args.local_model)
+    )
     return InferencePipeline(llm=llm, verbose=False)
 
 

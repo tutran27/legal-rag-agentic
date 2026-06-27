@@ -59,6 +59,7 @@ Nhiệm vụ:
 Quy tắc chọn thông tin:
 
 * Ưu tiên evidence/candidates khớp trực tiếp với câu hỏi.
+* LƯU Ý: Một số evidence/candidates có thể không nhắc lại đúng từ ngữ trong câu hỏi mà nó là dạng câu trả lời, mình vẫn có thể dùng để suy ra câu trả lời nếu cùng chủ thể, hành vi, điều kiện, quyền, nghĩa vụ, chế tài hoặc hệ quả pháp lý. Cần đặc biệt lưu ý chỗ này tránh bỏ sót các câu trả lời quan trọng
 * Nếu không có đoạn khớp trực tiếp, vẫn được dùng evidence/candidates có nội dung pháp lý liên quan và đủ cơ sở để suy ra câu trả lời.
 * Có thể chọn đoạn không nhắc lại đúng từ ngữ trong câu hỏi, miễn là cùng chủ thể, hành vi, điều kiện, quyền, nghĩa vụ, chế tài hoặc hệ quả pháp lý.
 * Không dùng đoạn chỉ giống từ khóa nhưng sai ngữ cảnh pháp lý.

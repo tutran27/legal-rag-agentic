@@ -12,6 +12,10 @@ def _tokens(text: str) -> set[str]:
     return set(re.findall(r"\w+", text.lower()))
 
 
+def _distance_boost(distance: int) -> float:
+    return 1.0 / (1.0 + float(distance))
+
+
 def expand_context(
     candidates: list[Evidence],
     query: str = "",
@@ -69,13 +73,14 @@ def expand_context(
             )
             for seed_index, score in unit_seeds
         )
-        if distance != 1:
-            continue
-
         query_tokens = _tokens(query)
         row_tokens = _tokens(row.get("content_text") or row["text"])
         overlap = len(query_tokens & row_tokens) / max(len(query_tokens), 1)
-        score = 0.5 * float(seed_score) + overlap
+        score = (
+            0.45 * float(seed_score)
+            + 0.35 * _distance_boost(distance)
+            + 0.20 * overlap
+        )
         results.append(
             payload_to_evidence(row, source="context", score=score)
         )

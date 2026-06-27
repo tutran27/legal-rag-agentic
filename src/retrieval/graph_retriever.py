@@ -33,6 +33,15 @@ def _tokens(text: str) -> set[str]:
     }
 
 
+def _minmax(values: list[float]) -> list[float]:
+    low = min(values)
+    high = max(values)
+    value_range = high - low
+    if not value_range:
+        return [1.0 if high > 0 else 0.0] * len(values)
+    return [(value - low) / value_range for value in values]
+
+
 @lru_cache(maxsize=1)
 def load_graph(graph_path: str):
     with Path(graph_path).open("rb") as file:
@@ -149,9 +158,14 @@ def graph_search(
 
     query_tokens = _tokens(query)
 
-    results = []
+    graph_scores = [info["score"] for info in related_docs.values()]
+    normalized_graph_scores = dict(
+        zip(related_docs.keys(), _minmax(graph_scores))
+    )
+
+    overlap_values = []
+    row_overlaps = []
     for row, retrieval_score in rows:
-        graph_info = related_docs[row["doc_id"]]
         text = " ".join(
             [
                 str(row.get("article_title") or ""),
@@ -160,11 +174,22 @@ def graph_search(
         )
         text_tokens = _tokens(text)
         overlap = (
-            retrieval_score
+            float(retrieval_score)
             if retrieval_score is not None
             else len(query_tokens & text_tokens) / max(len(query_tokens), 1)
         )
-        score = graph_info["score"] + overlap
+        row_overlaps.append((row, overlap))
+        overlap_values.append(overlap)
+
+    normalized_overlaps = _minmax(overlap_values)
+    results = []
+    for (row, overlap), overlap_score in zip(
+        row_overlaps,
+        normalized_overlaps,
+    ):
+        graph_info = related_docs[row["doc_id"]]
+        graph_score = normalized_graph_scores[row["doc_id"]]
+        score = 0.6 * graph_score + 0.4 * overlap_score
         metadata = {
             **row,
             "relation_type": graph_info["relation"],

@@ -164,7 +164,7 @@ def test_hybrid_search_accepts_filter_per_query():
     assert results == [[], []]
 
 
-def test_context_expansion_only_keeps_adjacent_parts(tmp_path):
+def test_context_expansion_keeps_related_parts_in_same_unit(tmp_path):
     corpus_path = tmp_path / "corpus.parquet"
     pd.DataFrame(
         [
@@ -205,7 +205,7 @@ def test_context_expansion_only_keeps_adjacent_parts(tmp_path):
         corpus_path=str(corpus_path),
     )
 
-    assert [item.chunk_id for item in results] == ["c0"]
+    assert [item.chunk_id for item in results] == ["c0", "c3"]
 
 
 def test_context_expansion_uses_qdrant_payload():

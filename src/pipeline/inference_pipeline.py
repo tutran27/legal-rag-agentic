@@ -27,9 +27,14 @@ from src.retrieval.graph_retriever import graph_search, load_graph
 from src.retrieval.hybrid_retriever import hybrid_search_batch
 from src.retrieval.summary_retriever import summary_search
 from src.schema.agent_schemas import (
+    AnswerDraft,
     Evidence,
     InferenceResult,
+    PlanningResult,
+    QueryPlan,
     RetrievalFilter,
+    RetrievalPlan,
+    SearchQuery,
 )
 from src.submission.validate_results import validate_submission_item
 
@@ -88,12 +93,14 @@ class InferencePipeline:
         verbose: bool = True,
         enable_colbert: bool = settings.enable_colbert,
         enable_cross_encoder: bool = settings.enable_cross_encoder,
+        retrieval_only: bool = settings.retrieval_only,
     ) -> None:
         self.verbose = verbose
         self.enable_colbert = enable_colbert
         self.enable_cross_encoder = enable_cross_encoder
+        self.retrieval_only = retrieval_only
         started = time.perf_counter()
-        self.llm = llm or create_llm_client()
+        self.llm = None if retrieval_only else (llm or create_llm_client())
         self.dense_model = dense_model or load_dense_model()
         self.colbert_model = (
             (colbert_model or load_colbert_model())
@@ -162,14 +169,35 @@ class InferencePipeline:
         cached = self._planning_cache.get(question)
         if cached is not None:
             return cached
-        planning = QueryPlannerAgent(self.llm).run(question)
+        if self.retrieval_only:
+            planning = self._build_retrieval_only_plan(question)
+        else:
+            planning = QueryPlannerAgent(self.llm).run(question)
         self._planning_cache[question] = planning
         return planning
 
     def _get_llm_for_query(self) -> Any:
+        if self.llm is None:
+            return None
         if hasattr(self.llm, "for_query"):
             return self.llm.for_query()
         return self.llm
+
+    @staticmethod
+    def _build_retrieval_only_plan(question: str) -> PlanningResult:
+        return PlanningResult(
+            plan=QueryPlan(
+                queries=[
+                    SearchQuery(
+                        query_type="original",
+                        text=question.strip(),
+                        reason="Query gốc để test retrieval",
+                    )
+                ],
+                filters=RetrievalFilter(),
+                retrieval=RetrievalPlan(),
+            )
+        )
 
     def _get_dense_vectors(self, query_texts: list[str]):
         if not hasattr(self, "_dense_cache"):
@@ -667,6 +695,23 @@ class InferencePipeline:
             latencies,
         )
         self._print_results(final_candidates)
+        if self.retrieval_only:
+            selected_evidence = final_candidates[: settings.final_top_k]
+            submission = SubmissionFormatterAgent().run(
+                question_id=question_id,
+                question=question,
+                answer=AnswerDraft(answer=""),
+                evidence=selected_evidence,
+            )
+            validate_submission_item(submission, selected_evidence)
+            latencies["Total query"] = time.perf_counter() - query_started
+            return InferenceResult(
+                submission=submission,
+                final_candidates=final_candidates,
+                selected_evidence=selected_evidence,
+                latencies=latencies,
+            )
+
         selected_evidence = self._select_evidence(
             question,
             final_candidates,
@@ -703,7 +748,7 @@ class InferencePipeline:
         query_started = time.perf_counter()
         started = time.perf_counter()
         llm = self._get_llm_for_query()
-        planning = QueryPlannerAgent(llm).run(question)
+        planning = self._get_planning(question)
         self._log_latency(
             "Query planning",
             started,
@@ -738,7 +783,7 @@ class InferencePipeline:
             started = time.perf_counter()
             try:
                 llm = self._get_llm_for_query()
-                planning = QueryPlannerAgent(llm).run(question)
+                planning = self._get_planning(question)
                 latencies["Query planning"] = (
                     time.perf_counter() - started
                 )

@@ -8,23 +8,16 @@ import requests
 import torch
 from dotenv import load_dotenv
 
+from src.common.config import settings
+
 
 load_dotenv()
 
-DEFAULT_ENDPOINT_URL = (
-    "https://hieudan2810--qwen2-5-14b-vllm-serve.modal.run"
-)
-DEFAULT_ENDPOINT_MODEL = "qwen2.5-14b-instruct"
 DEFAULT_SYSTEM_PROMPT = (
     "Bạn là trợ lý AI chuyên nghiệp. Trả lời ngắn gọn, chính xác và "
     "đúng yêu cầu."
 )
-DEFAULT_LOCAL_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 JSON_RETRY_ATTEMPTS = 2
-DEFAULT_GROQ_MODEL = "llama-3.1-8b-instant"
-DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
-DEFAULT_OPENROUTER_MODEL = "meta-llama/llama-3.1-8b-instruct"
-DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 
 def _log_retry(
@@ -61,12 +54,12 @@ def _split_env_list(raw: str | None) -> list[str]:
 
 
 def _load_openrouter_api_key(primary_key: str | None) -> str | None:
-    return primary_key or os.getenv("OPENROUTER_API_KEY")
+    return primary_key or settings.openrouter_api_key
 
 
 def _load_groq_api_keys(primary_key: str | None) -> list[str]:
     keys = []
-    for key in [primary_key, os.getenv("GROQ_API_KEY")]:
+    for key in [primary_key, settings.groq_api_key]:
         if key and key not in keys:
             keys.append(key)
 
@@ -75,7 +68,7 @@ def _load_groq_api_keys(primary_key: str | None) -> list[str]:
         if key and key not in keys:
             keys.append(key)
 
-    for key in _split_env_list(os.getenv("GROQ_API_KEYS")):
+    for key in _split_env_list(settings.groq_api_keys):
         if key not in keys:
             keys.append(key)
     return keys
@@ -95,13 +88,11 @@ def _json_repair_prompt(system_prompt: str | None) -> str:
 
 
 def _json_repair_query(original_query: str, bad_output: str) -> str:
-    return json.dumps(
-        {
-            "original_input": original_query,
-            "invalid_output": bad_output[:4000],
-            "instruction": "Sửa thành JSON object hợp lệ theo đúng schema đã yêu cầu.",
-        },
-        ensure_ascii=False,
+    return (
+        f"Câu hỏi gốc:\n{original_query}\n\n"
+        f"Phản hồi trước không phải JSON hợp lệ:\n{bad_output[:4000]}\n\n"
+        f"Yêu cầu: Chỉ trả lại một JSON object duy nhất theo đúng schema đã yêu cầu. "
+        f"Không markdown, không giải thích, không thêm bất kỳ text nào khác ngoài JSON."
     )
 
 
@@ -116,18 +107,16 @@ class EndpointLLMClient:
     ) -> None:
         self.endpoint_url = (
             endpoint_url
-            or os.getenv("LLM_ENDPOINT_URL")
-            or DEFAULT_ENDPOINT_URL
+            or settings.llm_endpoint_url
         ).rstrip("/")
-        self.api_key = api_key or os.getenv("QWEN_API_KEY")
+        self.api_key = api_key or settings.qwen_api_key
         if not self.api_key:
             raise ValueError("Thiếu QWEN_API_KEY để dùng LLM_BACKEND=endpoint.")
         self.model = (
             model
-            or os.getenv("LLM_ENDPOINT_MODEL")
-            or DEFAULT_ENDPOINT_MODEL
+            or settings.llm_endpoint_model
         )
-        self.timeout = timeout or int(os.getenv("LLM_ENDPOINT_TIMEOUT", "600"))
+        self.timeout = timeout or settings.llm_endpoint_timeout
         self.session = session or requests.Session()
 
     def health(self) -> dict[str, Any]:
@@ -183,24 +172,52 @@ class EndpointLLMClient:
 
     @staticmethod
     def extract_json_object(text: str) -> dict[str, Any]:
+        """Trích xuất JSON object từ phản hồi LLM, kể cả khi có preamble."""
         text = text.strip()
+
+        # 1) Thử parse nguyên văn — nhanh nhất nếu output đã là JSON thuần
         for strict in (True, False):
             try:
                 return json.loads(text, strict=strict)
             except json.JSONDecodeError:
                 pass
 
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if not match:
-            raise ValueError(
-                f"Không tìm thấy JSON object trong phản hồi LLM:\n{text}"
-            )
+        # 2) Tìm vị trí dấu { đầu tiên và đếm ngoặc để lấy outermost JSON object
+        start = text.find("{")
+        if start != -1:
+            depth = 0
+            in_string = False
+            escape = False
+            for end in range(start, len(text)):
+                ch = text[end]
+                if escape:
+                    escape = False
+                    continue
+                if ch == "\\":
+                    escape = True
+                    continue
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                if in_string:
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                if depth == 0:
+                    candidate = text[start : end + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        try:
+                            return json.loads(candidate, strict=False)
+                        except json.JSONDecodeError:
+                            break  # tiếp tục tìm nếu candidate không parse được
 
-        json_text = match.group(0)
-        try:
-            return json.loads(json_text)
-        except json.JSONDecodeError:
-            return json.loads(json_text, strict=False)
+        raise ValueError(
+            f"Không tìm thấy JSON object trong phản hồi LLM:\n{text}"
+        )
 
     def call_llm_json(
         self,
@@ -255,17 +272,11 @@ class GroqLLMClient:
         if not self.api_keys:
             raise ValueError("Thiếu GROQ_API_KEY để dùng LLM_BACKEND=groq.")
         self.api_key = self.api_keys[0]
-        self.model = model or os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL
-        self.base_url = (
-            base_url or os.getenv("GROQ_BASE_URL") or DEFAULT_GROQ_BASE_URL
-        ).rstrip("/")
-        self.timeout = timeout or int(os.getenv("GROQ_TIMEOUT", "120"))
-        self.retry_attempts = retry_attempts or int(
-            os.getenv("GROQ_RETRY_ATTEMPTS", "4")
-        )
-        self.retry_delay = retry_delay or float(
-            os.getenv("GROQ_RETRY_DELAY", "5")
-        )
+        self.model = model or settings.groq_model
+        self.base_url = (base_url or settings.groq_base_url).rstrip("/")
+        self.timeout = timeout or settings.groq_timeout
+        self.retry_attempts = retry_attempts or settings.groq_retry_attempts
+        self.retry_delay = retry_delay or float(settings.groq_retry_delay)
         self.session = session or requests.Session()
         self._next_api_key_index = 0
 
@@ -412,20 +423,18 @@ class OpenRouterLLMClient:
             )
         self.model = (
             model
-            or os.getenv("OPENROUTER_MODEL")
-            or DEFAULT_OPENROUTER_MODEL
+            or settings.openrouter_model
         )
         self.base_url = (
             base_url
-            or os.getenv("OPENROUTER_BASE_URL")
-            or DEFAULT_OPENROUTER_BASE_URL
+            or settings.openrouter_base_url
         ).rstrip("/")
-        self.timeout = timeout or int(os.getenv("OPENROUTER_TIMEOUT", "120"))
-        self.retry_attempts = retry_attempts or int(
-            os.getenv("OPENROUTER_RETRY_ATTEMPTS", "4")
+        self.timeout = timeout or settings.openrouter_timeout
+        self.retry_attempts = (
+            retry_attempts or settings.openrouter_retry_attempts
         )
         self.retry_delay = retry_delay or float(
-            os.getenv("OPENROUTER_RETRY_DELAY", "5")
+            settings.openrouter_retry_delay
         )
         self.session = session or requests.Session()
 
@@ -554,16 +563,18 @@ class LocalQwenLLMClient:
 
         self.model_name = (
             model_name
-            or os.getenv("LOCAL_LLM_MODEL")
-            or DEFAULT_LOCAL_MODEL
+            or settings.local_llm_model
         )
-        env_max_model_len = os.getenv("LOCAL_LLM_MAX_MODEL_LEN")
         self.max_model_len = (
             max_model_len
             if max_model_len is not None
-            else int(env_max_model_len) if env_max_model_len else None
+            else (
+                settings.local_llm_max_model_len
+                if settings.local_llm_max_model_len > 0
+                else None
+            )
         )
-        self.load_in_4bit = _env_bool("LOCAL_LLM_LOAD_IN_4BIT", True)
+        self.load_in_4bit = settings.local_llm_load_in_4bit
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_name,
             trust_remote_code=True,
@@ -698,7 +709,7 @@ def create_llm_client(
     | OpenRouterLLMClient
     | LocalQwenLLMClient
 ):
-    selected = (backend or os.getenv("LLM_BACKEND") or "endpoint").lower()
+    selected = (backend or settings.llm_backend).lower()
     if selected == "groq":
         return GroqLLMClient()
     if selected == "openrouter":

@@ -11,7 +11,7 @@ from src.schema.agent_schemas import (
 )
 
 
-QUERY_PLAN_MAX_TOKENS =384
+QUERY_PLAN_MAX_TOKENS =512
 
 INTENT_CONTEXT = {
     "condition": "điều kiện tiêu chí đối tượng được hỗ trợ",
@@ -59,8 +59,7 @@ Quy tắc bắt buộc:
 
 Ví dụ:
 Câu hỏi: Nếu công ty giữ bản chính bằng cấp của nhân viên khi ký hợp đồng thì xử lý thế nào?
-legal_rewrite: công ty giữ bản chính bằng cấp của người lao động khi giao kết hợp đồng lao động bị xử lý và khắc phục
-
+legal_rewrite: Phương án xử lí khi công ty giữ bản chính bằng cấp của nhân viên khi ký hợp đồng
 Chỉ trả JSON:
 {
   "plan": {

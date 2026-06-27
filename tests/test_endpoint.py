@@ -119,7 +119,10 @@ def test_call_llm_json_retries_invalid_json_response(capsys):
     assert session.post.call_count == 2
     assert "stage=llm reason=invalid_json attempt=1/2" in capsys.readouterr().out
     retry_payload = session.post.call_args_list[1].kwargs["json"]
-    assert "invalid_output" in retry_payload["messages"][1]["content"]
+    # Với format mới, retry query là plain text chứa câu hỏi gốc và output lỗi
+    assert "Câu hỏi" in retry_payload["messages"][1]["content"]
+    assert "thiếu đóng json" in retry_payload["messages"][1]["content"]
+    assert "JSON object duy nhất" in retry_payload["messages"][1]["content"]
     assert "JSON object hợp lệ" in retry_payload["messages"][0]["content"]
 
 

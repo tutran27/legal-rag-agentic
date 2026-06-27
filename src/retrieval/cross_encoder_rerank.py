@@ -17,6 +17,12 @@ def _minmax(values: list[float]) -> list[float]:
     return [(value - low) / value_range for value in values]
 
 
+def _fusion_weight(use_colbert: bool) -> tuple[float, float, float]:
+    if use_colbert:
+        return (0.45, 0.35, 0.20)
+    return (0.65, 0.0, 0.35)
+
+
 def cross_encoder_rerank(
     query: str,
     candidates,
@@ -61,10 +67,8 @@ def cross_encoder_rerank(
     colbert_scores = [
         candidate.colbert_normalized_score or 0.0 for candidate in candidates
     ]
-    fusion_scores = _minmax(
-        [candidate.final_score for candidate in candidates]
-    )
-    weights = (0.4, 0.4, 0.2) if use_colbert else (0.7, 0.0, 0.3)
+    fusion_scores = _minmax([candidate.score for candidate in candidates])
+    weights = _fusion_weight(use_colbert)
     reranked = [
         candidate.model_copy(
             update={

@@ -1,270 +1,237 @@
 # Legal Agent RAG
 
-Hệ thống hỏi đáp pháp luật Việt Nam theo hướng Agentic RAG. Repo tập trung vào
-việc chuẩn hóa dữ liệu văn bản pháp luật, xây dựng corpus retrieval, ingest vào
-Qdrant và chạy pipeline sinh câu trả lời có căn cứ.
+Hệ thống hỏi đáp pháp luật Việt Nam theo hướng multi-stage RAG, tập trung vào:
 
-## Tổng Quan
-
-Pipeline hiện tại kết hợp:
-
-- Legal query planning bằng LLM.
-- Hybrid retrieval trên Qdrant: dense vector + BM25 sparse vector.
-- Exact search theo mã văn bản/điều nếu câu hỏi có định danh rõ.
-- Graph/context expansion để bổ sung văn bản hoặc đơn vị pháp lý liên quan.
-- ColBERT và cross-encoder rerank.
-- Reasoning, formatter và validate schema submission.
+- xử lý dữ liệu văn bản pháp luật,
+- build retrieval corpus,
+- ingest vào Qdrant,
+- chạy retrieval / rerank / inference,
+- xuất `results.json` đúng format nộp bài.
 
 ## Pipeline
 
 ```mermaid
 flowchart TD
-    A["Question"] --> B["Query Planner Agent<br/>understanding + search queries + filters"]
-
-    B --> C["Retrieval"]
-    C --> C1["Hybrid Retrieval<br/>Dense + BM25/Qdrant IDF"]
-    C --> C2["Exact Search<br/>doc_code / article / keyword"]
-    C --> C3["Summary Retrieval<br/>optional"]
-
-    C1 --> D["Weighted RRF Fusion"]
-    C2 --> D
-    C3 --> D
-
-    D --> E["Graph + Context Expansion<br/>when needed"]
-    E --> F["Expanded Fusion"]
-
-    F --> G["ColBERT Rerank"]
-    G --> H["Cross-Encoder Rerank"]
-    H --> I["Final Candidates"]
-
-    I --> L["Reasoner Agent"]
-
-    L --> O["Submission Formatter"]
-    O --> P["Pydantic Validator"]
-    P --> Q["results.json"]
-    Q --> R["results.zip"]
+    A["Question"] --> B["Query Planner"]
+    B --> C["Hybrid Retrieval<br/>Dense + Sparse"]
+    B --> D["Exact Retrieval"]
+    C --> E["RRF Fusion"]
+    D --> E
+    E --> F["Graph Expansion"]
+    E --> G["Context Expansion"]
+    F --> H["Expanded Fusion"]
+    G --> H
+    H --> I["ColBERT Rerank"]
+    I --> J["Cross-Encoder Rerank"]
+    J --> K["Final Candidates"]
+    K --> L["Evidence Selection"]
+    L --> M["Reasoning"]
+    M --> N["Submission Formatter"]
+    N --> O["results.json"]
 ```
 
-## Cấu Trúc
+## Retrieval-only mode
+
+Repo hiện đã hỗ trợ `RETRIEVAL_ONLY=true`.
+
+Khi bật mode này:
+
+- không dùng Query Planner LLM,
+- không dùng Evidence Selector,
+- không dùng Reasoner,
+- không sinh answer,
+- query đi thẳng vào retrieval,
+- lấy top-k cuối để map sang:
+  - `relevant_docs`
+  - `relevant_articles`
+- `answer` luôn là `""`
+
+Mode này dùng để test retrieval có ra đúng văn bản / điều khoản hay không.
+
+## Cấu trúc repo
 
 ```text
-scripts/        Entrypoint download, process, ingest, inference, submission
-src/agents/     Agent và prompt nghiệp vụ
-src/chunking/   Tạo retrieval corpus
+scripts/        Script download, process, ingest, inference, submission
+src/agents/     Agent nghiệp vụ
 src/common/     Config, embedding, BM25
-src/data/       Download và chuẩn hóa dữ liệu
-src/generation/ Endpoint/local LLM client
-src/indexing/   Graph index và Qdrant collection
-src/pipeline/   Orchestration inference
+src/data/       Xử lý dữ liệu nguồn
+src/generation/ LLM clients
+src/indexing/   Qdrant collection, graph index
+src/pipeline/   Inference pipeline
 src/retrieval/  Retrieval, fusion, expansion, rerank
 src/schema/     Pydantic schema
-src/submission/ Validate và đóng gói kết quả
+src/submission/ Validate và ghi kết quả
 tests/          Unit tests
 ```
 
-## Yêu Cầu
+## Yêu cầu
 
 - Python 3.11
-- Docker hoặc Docker Desktop để chạy Qdrant local
-- NVIDIA GPU nếu chạy local LLM/reranker
-- HuggingFace token nếu cần tải model private/gated
+- PowerShell
+- Docker Desktop hoặc Docker Engine
+- Qdrant local
+- GPU nếu muốn chạy rerank/local model nhanh hơn
 
-## Cài Đặt
+## Cài đặt
 
-```bash
-conda create -n legal_rag_agent python=3.11
-conda activate legal_rag_agent
+```powershell
+conda create -n legal_rag python=3.11 -y
+conda activate legal_rag
 pip install -r requirements.txt
 ```
 
 Khởi động Qdrant:
 
-```bash
+```powershell
 docker compose up -d
-curl http://localhost:6333/healthz
+Invoke-WebRequest http://localhost:6333/healthz
 ```
 
-## Cấu Hình
+## Cấu hình `.env`
 
-Tạo file `.env` ở root repo:
+Repo đang ưu tiên chạy bằng OpenRouter và đang bật retrieval-only để test retrieval.
+
+Ví dụ:
 
 ```env
-HF_TOKEN=your-huggingface-token
+LLM_BACKEND=openrouter
+OPENROUTER_API_KEY=your-openrouter-key
+OPENROUTER_MODEL=meta-llama/llama-3.1-8b-instruct
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_TIMEOUT=120
+OPENROUTER_RETRY_ATTEMPTS=4
+OPENROUTER_RETRY_DELAY=5
 
 QDRANT_URL=http://localhost:6333
 QDRANT_API_KEY=
 QDRANT_COLLECTION=legal_agent_rag_harrier_idf
+QDRANT_TIMEOUT=120
+QDRANT_HNSW_EF=64
 
-# LLM mặc định: Qwen 2.5 14B qua endpoint OpenAI-compatible
-LLM_BACKEND=endpoint
-QWEN_API_KEY=your-qwen-api-key
-LLM_ENDPOINT_URL=https://onthi206--qwen2-5-14b-vllm-serve.modal.run
-LLM_ENDPOINT_MODEL=qwen2.5-14b-instruct
-LLM_ENDPOINT_TIMEOUT=600
-
-# Chỉ dùng khi LLM_BACKEND=local
-LOCAL_LLM_MODEL=Qwen/Qwen3-4B-Instruct-2507
-LOCAL_LLM_MAX_MODEL_LEN=4096
-LOCAL_LLM_LOAD_IN_4BIT=true
-
-# Retrieval/rerank
 DENSE_MODEL=mainguyen9/vietlegal-harrier-0.6b
 COLBERT_MODEL=BAAI/bge-m3
-RETRIEVAL_TOP_K=60
-INITIAL_FUSION_TOP_K=40
-COLBERT_TOP_K=20
-CROSS_ENCODER_TOP_K=15
-FINAL_TOP_K=8
-RERANK_MAX_CHARS=800
-COLBERT_BATCH_SIZE=4
-CROSS_ENCODER_BATCH_SIZE=4
+CROSS_ENCODER_MODEL=Qwen/Qwen3-Reranker-0.6B
 
-# Graph/context
+RETRIEVAL_TOP_K=120
+INITIAL_FUSION_TOP_K=80
+COLBERT_TOP_K=60
+CROSS_ENCODER_TOP_K=40
+FINAL_TOP_K=30
+
 GRAPH_SEED_TOP_K=5
 GRAPH_TOP_K=10
 CONTEXT_TOP_K=10
 PRELOAD_GRAPH=true
+
+ENABLE_COLBERT=true
+ENABLE_CROSS_ENCODER=true
+ENABLE_REASONING=true
+RETRIEVAL_ONLY=true
 ```
 
-Gợi ý cho GPU 12 GB: giữ `COLBERT_BATCH_SIZE=2..4`,
-`CROSS_ENCODER_BATCH_SIZE=2..4`, `LOCAL_LLM_MAX_MODEL_LEN=4096`. Int4 chỉ giảm
-VRAM của LLM, không giảm bộ nhớ cho dense model, ColBERT, cross-encoder và KV
-cache.
+Ghi chú:
 
-## Chuẩn Bị Dữ Liệu
+- `RETRIEVAL_ONLY=true`: chỉ test retrieval, không gọi agent/LLM.
+- nếu muốn quay lại pipeline đầy đủ, đổi `RETRIEVAL_ONLY=false`.
 
-Chạy theo thứ tự:
+## Chuẩn bị dữ liệu
 
-```bash
-python scripts/01_download_data.py
-python scripts/02_process_data.py
+```powershell
+python .\scripts\01_download_data.py
+python .\scripts\02_process_data.py
 python -m src.indexing.build_graph
 ```
 
-Sau xử lý, các file chính nằm trong `data/processed/`:
-
-```text
-documents.parquet
-vbpl_articles.parquet
-legal_edges.parquet
-legal_units.parquet
-retrieval_corpus.parquet
-submission_mapping.parquet
-```
-
-## Tạo Embedding Và Ingest Qdrant
+## Ingest vào Qdrant
 
 Nếu đã có embedding shards:
 
-```bash
+```powershell
 python -m scripts.modal_shards_to_qdrant --recreate --build-hnsw
-python scripts/05_create_payload_indexes.py
+python .\scripts\05_create_payload_indexes.py
 ```
 
-Nếu cần chạy embedding trên Modal:
+## Chạy inference
 
-```bash
-modal token new
-modal secret create legal-rag-secrets HF_TOKEN="YOUR-HF-TOKEN"
-modal run scripts/modal_ingest.py --action upload
-modal run --detach scripts/modal_ingest.py --action start --recreate
-```
+### 1. Test 1 câu hỏi
 
-Tải shards về local:
-
-```bash
-modal volume get legal-rag-ingest-data /embedding_shards data/embedding_shards
-```
-
-Ingest vào Qdrant:
-
-```bash
-python -m scripts.modal_shards_to_qdrant \
-  --shards-dir data/embedding_shards \
-  --recreate \
-  --build-hnsw
-python scripts/05_create_payload_indexes.py
-```
-
-## Chạy Inference
-
-Một câu hỏi:
-
-```bash
-python -m scripts.03_run_inference \
-  --query "Điều kiện hỗ trợ doanh nghiệp nhỏ và vừa là gì?" \
-  --question-id 1 \
+```powershell
+python .\scripts\03_run_inference.py `
+  --query "Các cơ sở ươm tạo và khu làm việc chung được hưởng những chính sách hỗ trợ nào về thuế và đất đai?" `
+  --question-id 1 `
   --output results.json
 ```
 
-Chạy từ file câu hỏi:
+Trong `RETRIEVAL_ONLY=true`, output sẽ có:
 
-```bash
-python -m scripts.03_run_inference \
-  --input R2AIStage1DATA.json \
-  --output results.json \
+- `answer = ""`
+- chỉ map `relevant_docs` và `relevant_articles` từ top-k retrieval cuối
+
+### 2. Chạy từ file input
+
+```powershell
+python .\scripts\03_run_inference.py `
+  --input R2AIStage1DATA.json `
+  --output results.json `
   --batch-size 1
 ```
 
-Chạy batch lớn 2000 câu, giữ model sống trong một process và ghi kết quả sau
-từng query:
+### 3. Chạy batch 2000 câu
 
-```bash
-python scripts/06_run_2000_queries.py \
-  --input R2AIStage1DATA.json \
-  --output results.json \
-  --errors inference_errors.json \
-  --limit 2000 \
+```powershell
+python .\scripts\06_run_2000_queries.py `
+  --input R2AIStage1DATA.json `
+  --output results.json `
+  --errors inference_errors.json `
+  --limit 2000 `
   --resume
 ```
 
-Chạy lại riêng các ID còn trong `inference_errors.json`. Kết quả thành công được
-chèn vào `results.json` theo thứ tự của file input và được xóa khỏi file lỗi:
+Script này:
 
-```bash
-python -m scripts.07_retry_failed_queries \
-  --input R2AIStage1DATA.json \
-  --output results.json \
-  --llm openrouter \
-  --errors inference_errors.json
+- giữ model / retriever trong một process,
+- ghi kết quả sau mỗi query,
+- log lỗi vào `inference_errors.json`.
+
+## Chuyển về pipeline đầy đủ
+
+Muốn bật lại agent + LLM:
+
+1. sửa `.env`
+
+```env
+RETRIEVAL_ONLY=false
 ```
 
-Thêm `--limit 10` nếu chỉ muốn thử lại 10 lỗi đầu tiên.
+2. chạy lại:
 
-Chọn backend LLM ở CLI:
-
-```bash
-python -m scripts.03_run_inference --llm endpoint
-python -m scripts.03_run_inference --llm local --local-model Qwen/Qwen3-4B-Instruct-2507
+```powershell
+python .\scripts\03_run_inference.py --query "Câu hỏi pháp luật"
 ```
 
-## Đóng Gói Submission
+## Đóng gói submission
 
-```bash
-python scripts/04_build_submission.py \
-  --input results.json \
-  --output results.zip
+```powershell
+python .\scripts\04_build_submission.py --input results.json --output results.zip
 ```
 
-`results.zip` là ZIP phẳng chỉ chứa `results.json`.
+`results.zip` là zip phẳng chỉ chứa `results.json`.
 
-## Kiểm Thử
+## Test
 
-```bash
-pytest -q
+```powershell
+python -m pytest -q
 ```
 
-Một số nhóm test hữu ích:
+Một số nhóm test:
 
-```bash
-pytest tests/test_query_planner.py tests/test_reasoner.py -q
-pytest tests/test_reasoner.py tests/test_formatter.py -q
-pytest tests/test_retrieval.py tests/test_inference_pipeline.py -q
+```powershell
+python -m pytest .\tests\test_retrieval.py -q
+python -m pytest .\tests\test_inference_pipeline.py -q
+python -m pytest .\tests\test_endpoint.py -q
 ```
 
-## File Không Commit
-
-Không commit các artifact runtime:
+## Không commit
 
 ```text
 .env
@@ -272,7 +239,6 @@ data/raw/
 data/processed/
 data/embedding_shards*/
 data/qdrant_storage/
-data/qdrant_snapshots/
 results.json
 results.zip
 inference_errors.json
@@ -281,17 +247,4 @@ inference_errors.json
 *.bin
 *.safetensors
 *.log
-```
-
-## Lệnh Nhanh
-
-```bash
-conda activate legal_rag_agent
-docker compose up -d
-python scripts/01_download_data.py
-python scripts/02_process_data.py
-python -m scripts.modal_shards_to_qdrant --recreate --build-hnsw
-python scripts/05_create_payload_indexes.py
-python -m scripts.03_run_inference --query "Câu hỏi pháp luật"
-python scripts/04_build_submission.py
 ```

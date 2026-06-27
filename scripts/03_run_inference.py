@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.pipeline import InferencePipeline
 from src.generation.endpoint import create_llm_client
+from src.common.config import settings
 from src.schema.agent_schemas import InferenceResult, SubmissionItem, TestQuestion
 from src.submission.build_results import write_results
 
@@ -87,7 +88,11 @@ def run_single(args: argparse.Namespace) -> None:
     print(f"Query: {args.query}")
     print("================ PIPELINE INIT ==================")
     init_started = time.perf_counter()
-    llm = create_llm_client(args.llm, args.local_model)
+    llm = (
+        None
+        if settings.retrieval_only
+        else create_llm_client(args.llm, args.local_model)
+    )
     pipeline = InferencePipeline(llm=llm, verbose=not args.quiet)
     print(f"Khởi tạo pipeline xong: {time.perf_counter() - init_started:.3f}s")
     try:
@@ -122,7 +127,11 @@ def run_file(args: argparse.Namespace) -> None:
     if not pending:
         return
 
-    llm = create_llm_client(args.llm, args.local_model)
+    llm = (
+        None
+        if settings.retrieval_only
+        else create_llm_client(args.llm, args.local_model)
+    )
     pipeline = InferencePipeline(llm=llm, verbose=not args.quiet)
     started = time.perf_counter()
     try:
