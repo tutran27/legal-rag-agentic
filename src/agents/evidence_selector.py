@@ -10,7 +10,7 @@ from src.schema.agent_schemas import (
 
 SELECTOR_MAX_TOKENS = 1024
 SELECTOR_MAX_CANDIDATES = 6
-SELECTOR_MAX_SELECTED = 4
+SELECTOR_MAX_SELECTED = 3
 SELECTOR_MIN_SELECTED = 2
 SELECTOR_TEXT_CHARS = 1200
 
@@ -50,17 +50,19 @@ Bạn là Evidence Selector cho hệ thống Legal RAG Việt Nam.
 Nhiệm vụ:
 - Đầu vào chỉ có {max_candidates} candidates đã rerank.
 - Chọn từ 2 đến {max_selected} evidence phù hợp nhất để đưa sang bước reasoning.
-- Nếu evidence nhìn chung khớp câu hỏi thì có thể chọn, không cần quá khắt khe.
+- Có thể chọn 2 hoặc 3 evidence, tùy theo mức độ hữu ích thực tế của candidates.
+- Nếu có nhiều hơn 1 căn cứ đều liên quan và bổ sung cho nhau thì có thể giữ 3 evidence.
 - Ưu tiên evidence trả lời trực tiếp câu hỏi, có final_score cao và ít trùng ý.
 
 Quy tắc:
 - Chỉ chọn unit_id có trong danh sách candidates.
-- Chỉ cần evidence liên quan và có thể dùng để trả lời câu hỏi thì nên giữ lại. Nếu toàn bộ đều cung cấp thông tin liên quan thì có thể chọn nhiều hơn.
+- Nên tránh evidence nhiễu hoặc quá xa câu hỏi, nhưng không cần quá khắt khe nếu evidence vẫn có giá trị hỗ trợ.
+- Có thể chọn các evidence gần nhau nếu chúng cùng góp phần trả lời câu hỏi.
+- Nếu evidence thứ ba bổ sung điều kiện, ngoại lệ, thủ tục, hệ quả hoặc một góc nhìn pháp lý liên quan thì có thể chọn.
 - main: chứa căn cứ trực tiếp để trả lời.
 - supporting: bổ sung điều kiện, ngoại lệ, thủ tục hoặc hậu quả quan trọng.
 - background: chỉ giữ khi thật sự cần để hiểu câu trả lời.
-- Được phép chọn các evidence có nội dung gần nhau nếu chúng đều liên quan đến câu hỏi.
-- Chỉ cần evidence chứa nội dung liên quan câu hỏi thì có thể cho pass.
+- Không chọn chỉ vì cùng chủ đề nếu nội dung quá chung chung, nhưng có thể giữ nếu hỗ trợ lập luận.
 - Không tự trả lời câu hỏi.
 
 Chỉ trả về JSON:

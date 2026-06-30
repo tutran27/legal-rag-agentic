@@ -1,11 +1,11 @@
 from ddgs import DDGS
 
 
-QUERY = "Điều luật nào nói về Doanh nghiệp nhỏ và vừa phải đáp ứng điều kiện nào để được hỗ trợ theo Luật Hỗ trợ doanh nghiệp nhỏ và vừa?"  # sửa query ở đây
-NUM_CANDIDATES = 5
+QUERY = "công ty giữ bản chính bằng cấp của nhân viên khi ký hợp đồng thì xử lý thế nào?"  # sửa query ở đây
+NUM_CANDIDATES = 10
 
 
-def web_search(query: str, count: int = 5) -> list[dict]:
+def web_search(query: str, count: int = 10) -> list[dict]:
     results = []
 
     with DDGS() as ddgs:

@@ -19,7 +19,7 @@ def _minmax(values: list[float]) -> list[float]:
 
 def _fusion_weight(use_colbert: bool) -> tuple[float, float, float]:
     if use_colbert:
-        return (0.45, 0.35, 0.20)
+        return (0.5, 0.5, 0.0)
     return (0.65, 0.0, 0.35)
 
 
